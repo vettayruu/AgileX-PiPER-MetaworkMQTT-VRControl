@@ -40,11 +40,11 @@ function Norm(v) {
     return Math.sqrt(v.reduce((sum, val) => sum + val * val, 0));
 }
 
-// function Normalize(V) {
-//     const norm = Math.sqrt(V.reduce((sum, v) => sum + v * v, 0));
-//     if (NearZero(norm)) return V.map(() => 0); // 如果模长接近0，返回全0向量
-//     return V.map(v => v / norm);
-// }
+function Normalize(V) {
+    const norm = Math.sqrt(V.reduce((sum, v) => sum + v * v, 0));
+    if (NearZero(norm)) return V.map(() => 0); // 如果模长接近0，返回全0向量
+    return V.map(v => v / norm);
+}
 
 /**
  * Creates an n x n identity matrix
@@ -229,7 +229,25 @@ function three2world(v) {
     return matDot(R_three_inv, v);
 }
 
+function worlr2threeT(T) {
+    // 将世界坐标系下的变换矩阵转换为three坐标系下
+    const T_three = [[0, -1, 0, 0],
+                     [0,  0, 1, 0],
+                     [-1, 0, 0, 0],
+                     [0,  0, 0, 1]];
+    return matDot(T_three, T);
+}
 
+function three2worldT(T) {  
+    // 将three坐标系下的变换矩阵转换为世界坐标系下
+    const T_three_inv = [
+        [0, 0, -1, 0],
+        [-1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 0, 1]
+    ];
+    return matDot(T_three_inv, T);
+}
 
 /**
  * 将旋转矩阵转换为四元数 [x, y, z, w]
@@ -482,9 +500,9 @@ function AxisAng3(expc3) {
     const norm = Norm(expc3);
     if (NearZero(norm)) {
         // If norm is near zero, return zero vector and zero angle
-        return [Norm(expc3), 0];
+        return [Normalize(expc3), 0];
     }
-    const omghat = Norm(expc3);
+    const omghat = Normalize(expc3);
     const theta = norm;
     // Return the unit axis and the angle
     return [omghat, theta];
@@ -1197,6 +1215,76 @@ function SlistToBlist(M, Slist) {
     const Blist = matDot(Adjoint(TransInv(M)), Slist);
     return Blist;
 }
+
+
+/**
+ * Returns true if mat is close to or on the manifold SE(3)
+ * @param {Array<Array<number>>} T_sb Transformation matrix before the motion
+ * @param {Array<Array<number>>} T_sc Transformation matrix current the motion
+ * @returns {Array<Array<number>>} Returns a 6D twist vector [ω, v] and the rotation angle θ
+ * refernce: page 65, example 3.26
+ * Example Input:
+    const T_sb = [
+        [cos(rad(30)), -sin(rad(30)), 0, 1],
+        [sin(rad(30)), cos(rad(30)), 0, 2],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+    ];
+        const T_sc = [
+        [cos(rad(60)), -sin(rad(60)), 0, 2],
+        [sin(rad(60)), cos(rad(60)), 0, 1],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1]
+    ];
+ * Output:
+ *   [0, 0, 1, 3.3660254, -3.3660254, 0] 0.5235987755982988
+ */
+function GetTwistFromTransform(T_sb, T_sc) {
+    // T_SE = T_sc @ TransInv(T_sb)
+    const T_SE = matDot(T_sc, TransInv(T_sb));
+
+    // Step 1: Get se(3) matrix (对数映射)
+    const se3mat = MatrixLog6(T_SE);
+
+    // Step 2: Get 6D twist vector [wθ, vθ]
+    const twist_theta = se3ToVec(se3mat);
+
+    // Step 3: Extract angular part
+    const w_theta = twist_theta.slice(0, 3);
+    const v_theta = twist_theta.slice(3, 6);
+
+    // 判断是否为纯平移：w_theta 全为 0
+    const w_theta_norm = Norm(w_theta);
+    let omega_hat, theta, v;
+    
+    if (w_theta_norm < 1e-6) {
+        console.warn("Pure translation detected, setting omega_hat to zero.");
+        omega_hat = [0.0, 0.0, 0.0];
+        theta = Norm(v_theta);
+        if (theta < 1e-6) {
+            v = [0.0, 0.0, 0.0];  // 静止不动
+        } else {
+            v = v_theta.map(val => val / theta);
+        }
+    } else {
+        // 正常 twist 情况
+        [omega_hat, theta] = AxisAng3(w_theta);
+        v = v_theta.map(val => val / theta);
+    } 
+
+    // Full twist S = [ω, v]
+    const S = [omega_hat[0], omega_hat[1], omega_hat[2], v[0], v[1], v[2]];
+    
+    // console.log("T_SE (T_sc @ T_sb⁻¹):\n", T_SE);
+    // console.log("twist vector [ωθ, vθ]:\n", twist_theta);
+    // console.log("θ:", theta);
+    // console.log("ω:", omega_hat);
+    // console.log("v:", v);
+    // console.log("Twist S = [ω, v]:", S);
+    
+    return [S, theta];
+}
+
 
 /*** CHAPTER 4: FORWARD KINEMATICS ***/
 /**
@@ -2258,8 +2346,12 @@ module.exports = {
     matPinv,
     deg2rad,
     rad2deg,
+
     worlr2three,
     three2world,
+    worlr2threeT,
+    three2worldT,
+
     RotMatToQuaternion,
     QuaternionToRotMat,
     RotMatToEuler,
@@ -2289,6 +2381,7 @@ module.exports = {
     TestIfSE3,
     RotMatToAxisAngle,
     SlistToBlist,
+    GetTwistFromTransform,
 
     /* Chapter 4: Forward Kinematics */
     FKinBody,

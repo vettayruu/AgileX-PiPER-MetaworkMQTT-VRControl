@@ -6,6 +6,8 @@ export default function useMqtt({
   requestRobot,
   thetaBodyMQTT,
   thetaToolMQTT,
+  thetaBodyFeedback,
+  robotState,
   robotIDRef,
   MQTT_DEVICE_TOPIC,
   MQTT_CTRL_TOPIC,
@@ -18,13 +20,14 @@ export default function useMqtt({
     window.mqttClient.on('connect', () => {
       subscribeMQTT(MQTT_DEVICE_TOPIC);
       subscribeMQTT(MQTT_CTRL_TOPIC + idtopic);
+      subscribeMQTT(MQTT_ROBOT_STATE_TOPIC + idtopic);
     });
   }
 
   // define the joint handler for incoming messages
   const handler = (topic, message) => {
     let data;
-    console.log("收到MQTT Message:", topic, message.toString());
+    // console.log("Recived MQTT Message:", topic, message.toString());
     try {
       data = JSON.parse(message.toString());
     } catch (e) {
@@ -35,14 +38,13 @@ export default function useMqtt({
     if (topic === MQTT_DEVICE_TOPIC) {
       if (data.devId != undefined) {
         robotIDRef.current = data.devId;
-        const vrTopic = MQTT_CTRL_TOPIC + data.devId;
-        subscribeMQTT(vrTopic);
-        // subscribeMQTT(MQTT_ROBOT_STATE_TOPIC + data.devId);
+        subscribeMQTT(MQTT_CTRL_TOPIC + data.devId);
+        subscribeMQTT(MQTT_ROBOT_STATE_TOPIC + data.devId);
       }
       return;
     }
 
-    // subscribe joints and tool angles
+    // Publish Command to Robot
     if (props.viewer && topic === MQTT_CTRL_TOPIC + robotIDRef.current) {
       if (data.joints != undefined) {
         thetaBodyMQTT(prev => {
@@ -58,13 +60,35 @@ export default function useMqtt({
           if (JSON.stringify(prev) !== JSON.stringify(data.tool)) {
             return data.tool;
           }
-          console.log("Time:", data.time, "From:", topic, "Send Joint Tool:", data.tool);
+          // console.log("Time:", data.time, "From:", topic, "Send Joint Tool:", data.tool);
           return prev;
         });
       }
     }
-    
-    // if (!props.viewer && topic === MQTT_ROBOT_STATE_TOPIC + robotIDRef.current) { ... }
+
+    // Subscribe Robot State from Robot
+    if (!props.viewer && topic === MQTT_ROBOT_STATE_TOPIC + robotIDRef.current) {
+      if (data.state != undefined) {
+        console.log("Robot state:", data.state);
+        robotState(data.state);
+      }
+      if (data.model != undefined) {
+        console.log("Robot model:", data.model);
+      }
+      if (data.joint_feedback != undefined) {
+        thetaBodyFeedback(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(data.joint_feedback)) {
+            return data.joint_feedback;
+          }
+          console.log("From:", topic, "Recive Joint Feedback:", data.joint_feedback);
+          return prev;
+        });
+      }
+      if (data.tool != undefined) {
+        console.log("Robot current tool:", data.tool);
+      }
+      // robot_connected(true);
+    }
   };
 
   window.mqttClient.on('message', handler);

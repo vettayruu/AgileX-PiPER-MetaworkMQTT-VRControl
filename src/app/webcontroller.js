@@ -102,7 +102,7 @@ return (
                     type="number"
                     className="form-control"
                     id={`theta_${idx+1}`}
-                    value={theta.toFixed(5)}
+                    // value={theta.toFixed(5)}
                     onChange={e => {
                       const newTheta = [...theta_body];
                       newTheta[idx] = Number.parseFloat(e.target.value || 0);

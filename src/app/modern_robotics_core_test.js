@@ -618,100 +618,136 @@ const mr = require('../modern_robotics/modern_robotics_core.js');
 /* Function MassMatrix */
 
 // MassMatrix 测试数据
-const thetalist = [0.1, 0.1, 0.1];
-const dthetalist = [0.1, 0.2, 0.3];
+// const thetalist = [0.1, 0.1, 0.1];
+// const dthetalist = [0.1, 0.2, 0.3];
 
-const M01 = [
-    [1, 0, 0, 0],
-    [0, 1, 0, 0],
-    [0, 0, 1, 0.089159],
-    [0, 0, 0, 1]
-];
-const M12 = [
-    [0, 0, 1, 0.28],
-    [0, 1, 0, 0.13585],
-    [-1, 0, 0, 0],
-    [0, 0, 0, 1]
-];
-const M23 = [
-    [1, 0, 0, 0],
-    [0, 1, 0, -0.1197],
-    [0, 0, 1, 0.395],
-    [0, 0, 0, 1]
-];
-const M34 = [
-    [1, 0, 0, 0],
-    [0, 1, 0, 0],
-    [0, 0, 1, 0.14225],
-    [0, 0, 0, 1]
-];
+// const M01 = [
+//     [1, 0, 0, 0],
+//     [0, 1, 0, 0],
+//     [0, 0, 1, 0.089159],
+//     [0, 0, 0, 1]
+// ];
+// const M12 = [
+//     [0, 0, 1, 0.28],
+//     [0, 1, 0, 0.13585],
+//     [-1, 0, 0, 0],
+//     [0, 0, 0, 1]
+// ];
+// const M23 = [
+//     [1, 0, 0, 0],
+//     [0, 1, 0, -0.1197],
+//     [0, 0, 1, 0.395],
+//     [0, 0, 0, 1]
+// ];
+// const M34 = [
+//     [1, 0, 0, 0],
+//     [0, 1, 0, 0],
+//     [0, 0, 1, 0.14225],
+//     [0, 0, 0, 1]
+// ];
 
-const G1 = [
-    [0.010267, 0, 0, 0, 0, 0],
-    [0, 0.010267, 0, 0, 0, 0],
-    [0, 0, 0.00666, 0, 0, 0],
-    [0, 0, 0, 3.7, 0, 0],
-    [0, 0, 0, 0, 3.7, 0],
-    [0, 0, 0, 0, 0, 3.7]
-];
-const G2 = [
-    [0.22689, 0, 0, 0, 0, 0],
-    [0, 0.22689, 0, 0, 0, 0],
-    [0, 0, 0.0151074, 0, 0, 0],
-    [0, 0, 0, 8.393, 0, 0],
-    [0, 0, 0, 0, 8.393, 0],
-    [0, 0, 0, 0, 0, 8.393]
-];
-const G3 = [
-    [0.0494433, 0, 0, 0, 0, 0],
-    [0, 0.0494433, 0, 0, 0, 0],
-    [0, 0, 0.004095, 0, 0, 0],
-    [0, 0, 0, 2.275, 0, 0],
-    [0, 0, 0, 0, 2.275, 0],
-    [0, 0, 0, 0, 0, 2.275]
-];
-const Glist = [G1, G2, G3];
-const Mlist = [M01, M12, M23, M34];
-const Slist = [
-    [1, 0, 0],
-    [0, 1, 1],
-    [1, 0, 0],
-    [0, -0.089, -0.089],
-    [1, 0, 0],
-    [0, 0, 0.425]
-];
+// const G1 = [
+//     [0.010267, 0, 0, 0, 0, 0],
+//     [0, 0.010267, 0, 0, 0, 0],
+//     [0, 0, 0.00666, 0, 0, 0],
+//     [0, 0, 0, 3.7, 0, 0],
+//     [0, 0, 0, 0, 3.7, 0],
+//     [0, 0, 0, 0, 0, 3.7]
+// ];
+// const G2 = [
+//     [0.22689, 0, 0, 0, 0, 0],
+//     [0, 0.22689, 0, 0, 0, 0],
+//     [0, 0, 0.0151074, 0, 0, 0],
+//     [0, 0, 0, 8.393, 0, 0],
+//     [0, 0, 0, 0, 8.393, 0],
+//     [0, 0, 0, 0, 0, 8.393]
+// ];
+// const G3 = [
+//     [0.0494433, 0, 0, 0, 0, 0],
+//     [0, 0.0494433, 0, 0, 0, 0],
+//     [0, 0, 0.004095, 0, 0, 0],
+//     [0, 0, 0, 2.275, 0, 0],
+//     [0, 0, 0, 0, 2.275, 0],
+//     [0, 0, 0, 0, 0, 2.275]
+// ];
+// const Glist = [G1, G2, G3];
+// const Mlist = [M01, M12, M23, M34];
+// const Slist = [
+//     [1, 0, 0],
+//     [0, 1, 1],
+//     [1, 0, 0],
+//     [0, -0.089, -0.089],
+//     [1, 0, 0],
+//     [0, 0, 0.425]
+// ];
 
-const M = mr.MassMatrix(thetalist, Mlist, Glist, Slist);
+// const M = mr.MassMatrix(thetalist, Mlist, Glist, Slist);
 
-console.log("MassMatrix:");
-console.log(M);
+// console.log("MassMatrix:");
+// console.log(M);
 // 期望输出：
 // [[ 2.25433380e+01, -3.07146754e-01, -7.18426391e-03],
 //  [-3.07146754e-01,  1.96850717e+00,  4.32157368e-01],
 //  [-7.18426391e-03,  4.32157368e-01,  1.91630858e-01]]
 
-const VQF = mr.VelQuadraticForces(thetalist, dthetalist, Mlist, Glist, Slist);
-console.log("VelQuadraticForces:");
-console.log(VQF);
-// 期望输出：[0.26453118, -0.05505157, -0.00689132]
+// const VQF = mr.VelQuadraticForces(thetalist, dthetalist, Mlist, Glist, Slist);
+// console.log("VelQuadraticForces:");
+// console.log(VQF);
+// // 期望输出：[0.26453118, -0.05505157, -0.00689132]
 
-const g = [0, 0, -9.8]; 
-const GF = mr.GravityForces(thetalist, g, Mlist, Glist, Slist);
-console.log("GravityForces:");
-console.log(GF);
-// output：[28.40331262, -37.64094817, -5.4415892]
+// const g = [0, 0, -9.8]; 
+// const GF = mr.GravityForces(thetalist, g, Mlist, Glist, Slist);
+// console.log("GravityForces:");
+// console.log(GF);
+// // output：[28.40331262, -37.64094817, -5.4415892]
 
-const Ftip = [1, 1, 1, 1, 1, 1]; 
-const EF = mr.EndEffectorForces(thetalist, Ftip, Mlist, Glist, Slist);
-console.log("EndEffectorForces:");
-console.log(EF);
-// output：[1.40954608, 1.85771497, 1.392409]
+// const Ftip = [1, 1, 1, 1, 1, 1]; 
+// const EF = mr.EndEffectorForces(thetalist, Ftip, Mlist, Glist, Slist);
+// console.log("EndEffectorForces:");
+// console.log(EF);
+// // output：[1.40954608, 1.85771497, 1.392409]
 
-const taulist = [0.5, 0.6, 0.7]
+// const taulist = [0.5, 0.6, 0.7]
 
-const ddthetalist = mr.ForwardDynamics(
-    thetalist, dthetalist, taulist, g, Ftip, Mlist, Glist, Slist
-);
-console.log("ForwardDynamics Output:");
-console.log(ddthetalist);
-// output: [ -0.9739290670855627, 25.584667840340554, -32.91499212478148 ]
+// const ddthetalist = mr.ForwardDynamics(
+//     thetalist, dthetalist, taulist, g, Ftip, Mlist, Glist, Slist
+// );
+// console.log("ForwardDynamics Output:");
+// console.log(ddthetalist);
+// // output: [ -0.9739290670855627, 25.584667840340554, -32.91499212478148 ]
+
+const sin = Math.sin;
+const cos = Math.cos;
+const rad = (deg) => deg * (Math.PI / 180);
+
+// const T_sb = [
+//     [cos(rad(30)), -sin(rad(30)), 0, 1],
+//     [sin(rad(30)), cos(rad(30)), 0, 2],
+//     [0, 0, 1, 0],
+//     [0, 0, 0, 1]
+// ];
+//     const T_sc = [
+//     [cos(rad(60)), -sin(rad(60)), 0, 2],
+//     [sin(rad(60)), cos(rad(60)), 0, 1],
+//     [0, 0, 1, 0],
+//     [0, 0, 0, 1]
+// ];
+
+const T_sb =[
+    [1, 0, 0, 0.0],
+    [0, 1, 0, 0.0],
+    [0, 0, 1, 0.0],
+    [0, 0, 0, 1.0]
+]
+
+const T_sc =[
+    [1, 0, 0, 0.5],
+    [0, 1, 0, 0.0],
+    [0, 0, 1, 0.0],
+    [0, 0, 0, 1.0]
+]
+
+
+const [S, theta] = mr.GetTwistFromTransform(T_sb, T_sc);
+console.log("S:", S);
+console.log("theta:", theta);
