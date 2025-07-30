@@ -8,25 +8,16 @@ import registerAframeComponents from './registerAframeComponents';
 import useMqtt from './useMqtt';
 import { mqttclient, idtopic, publishMQTT, subscribeMQTT, codeType } from '../lib/MetaworkMQTT'
 
+/* ============================= Static Global Variables ==========================================*/
 const THREE = window.AFRAME.THREE;
 const mr = require('../modern_robotics/modern_robotics_core.js');
 const mynp = require('../modern_robotics/my_numpy.js');
-// const RobotKinematics = require('../modern_robotics/modern_robotics_Kinematics.js');
+const RobotKinematics = require('../modern_robotics/modern_robotics_Kinematics.js');
 const RobotDynamcis = require('../modern_robotics/modern_robotics_Dynamics.js');
 
 // Load Robot Model
 const robot_model = "agilex_piper"; // Change this to your robot model: jaka_zu_5, agilex_piper
-const rk = new RobotDynamcis(robot_model);
-const M = rk.get_M();
-const Mlist = rk.get_Mlist();
-const Glist = rk.get_Glist();
-const Slist = rk.get_Slist();
-const Kplist = rk.get_Kplist(); 
-const Kilist = rk.get_Kilist(); 
-const Kdlist = rk.get_Kdlist(); 
-const jointLimits = rk.jointLimits;
-const toolLimit = rk.toolLimit;
-const Blist = mr.SlistToBlist(M, Slist); // Convert Slist to Blist
+const toolLimit = { min: -1, max: 89 }; 
 
 const Euler_order = 'ZYX'; // Euler angle order
 const VR_Control_Mode = 'inBody'; // VR control mode: 'inSpace' or 'inBody'
@@ -39,18 +30,172 @@ const MQTT_DEVICE_TOPIC = "dev/" + idtopic;
 const MQTT_CTRL_TOPIC = "control/"; 
 const MQTT_ROBOT_STATE_TOPIC = "robot/";
 
+// IK State Codes
+const STATE_CODES = {
+  NORMAL: 0x00,           // 正常状态
+  IK_FAILED: 0x01,        // IK 求解失败
+  VELOCITY_LIMIT: 0x02,   // 达到速度上限
+  JOINT_LIMIT: 0x03,      // 关节限制
+};
+
+/* ============================= Functions ==========================================*/
+const loadRobotParams = (robot_model) => {
+  const rk = new RobotKinematics(robot_model);
+  const M = rk.get_M();
+  const Slist = rk.get_Slist();
+  const jointLimits = rk.jointLimits;
+  const Blist = mr.SlistToBlist(M, Slist);
+  const jointInitial = rk.get_jointInitial();
+
+  return {
+    M,
+    Slist,
+    jointLimits,
+    Blist,
+    jointInitial
+  };
+};
+
+
+/** FK **/
+function FK(robotParams, theta_body, VR_Control_Mode) {
+  const M = robotParams.M;
+  const Slist = robotParams.Slist;
+  const Blist = robotParams.Blist;
+
+  let T;
+  if (VR_Control_Mode === 'inBody') {
+    T = mr.FKinBody(M, Blist, theta_body);
+  }
+  else if (VR_Control_Mode === 'inSpace') {
+    T = mr.FKinSpace(M, Slist, theta_body);
+  } else {
+    throw new Error(`Invalid VR_Control_Mode: ${VR_Control_Mode}. Use 'inSpace' or 'inBody'.`);
+  }
+  return T;
+}
+
+/** IK **/
+function IK_joint_velocity_limit(T_sd, robotParams, theta_body, theta_body_guess, VR_Control_Mode) {
+  let thetalist_sol, ik_success;
+  const max_joint_velocity = 5.5; // Maximum joint velocity limit
+
+  const M = robotParams.M;
+  const Slist = robotParams.Slist;
+  const Blist = robotParams.Blist;
+  const jointLimits = robotParams.jointLimits;
+
+  let error_code = STATE_CODES.NORMAL;
+
+  if (VR_Control_Mode === 'inBody') {
+    [thetalist_sol, ik_success] = mr.IKinBody(Blist, M, T_sd, theta_body_guess, 1e-5, 1e-5);
+  } 
+  else if (VR_Control_Mode === 'inSpace') {
+    [thetalist_sol, ik_success] = mr.IKinSpace(Slist, M, T_sd, theta_body_guess, 1e-5, 1e-5);
+  }
+
+  if (ik_success) {
+    const thetalist_sol_limited = thetalist_sol.map((theta, i) =>
+      Math.max(jointLimits[i].min, Math.min(jointLimits[i].max, theta))
+    );
+
+    const delta_theta_body = thetalist_sol_limited.map((theta, i) => theta - theta_body[i]);
+    const d_theta_body = delta_theta_body.map((val) => val / dt);
+
+    const [joint_ometahat, joint_theta] = mr.AxisAng3(d_theta_body);
+
+    const joint_theta_limited = Math.max(0, Math.min(max_joint_velocity, joint_theta));
+
+    const new_theta_body = theta_body.map((theta, i) => theta + joint_ometahat[i] * joint_theta_limited * dt);
+
+    if (joint_theta_limited === max_joint_velocity) {
+      error_code = STATE_CODES.VELOCITY_LIMIT; 
+    }
+    return { new_theta_body, error_code }; 
+  } else {
+    console.warn("IK failed to converge");
+    error_code = STATE_CODES.IK_FAILED;
+    return { new_theta_body: theta_body, error_code };
+  }
+}
+
+
+/**
+ * VR Controller Relative Rotation Matrix Update
+ * @param {Array<number>} controller_object.quaternion // controller quaternion in 3D space
+ * @returns {Array<number>} vr_controller_R_relative   // Return the relative Rotation Matrix of the VR controller
+ */
+
+function vrquatToR(vr_controller_quat, VR_Control_Mode) {
+  // Initial offset quaternion to correct the VR controller orientation
+  const initialOffsetQuat = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler((0.6654549523360951 * -1), 0, 0, Euler_order)
+  );
+  const vrQuat = new THREE.Quaternion().multiplyQuaternions(vr_controller_quat, initialOffsetQuat);
+
+  // Transform vr controller's frame to world frame
+  const worldOffsetQuat = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler((Math.PI/2 * -1), Math.PI/2, 0, Euler_order)
+  );
+  const spaceQuat = new THREE.Quaternion().multiplyQuaternions(vrQuat, worldOffsetQuat);
+
+  // Offset quaternion to correct the end effector orientation
+  const bodyOffsetQuat = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler( Math.PI, 0, Math.PI, Euler_order)
+  );
+  const bodyQuat = new THREE.Quaternion().multiplyQuaternions(spaceQuat, bodyOffsetQuat);
+
+  // Transform the corrected quaternion to a rotation matrix
+  const matrix = new THREE.Matrix4();
+  if (VR_Control_Mode === 'inSpace') {
+    matrix.makeRotationFromQuaternion(spaceQuat);
+  } else if (VR_Control_Mode === 'inBody') {
+    matrix.makeRotationFromQuaternion(bodyQuat);
+  }
+
+  // The columns of the rotation matrix represent the axes of the controller
+  const elements = matrix.elements;
+  const vr_controller_R_current = [
+    [elements[0], elements[4], elements[8]],
+    [elements[1], elements[5], elements[9]],
+    [elements[2], elements[6], elements[10]]
+  ];
+  return vr_controller_R_current;
+}
+
+
 export default function DynamicHome(props) {
   const [now, setNow] = React.useState(new Date())
-  const [rendered,set_rendered] = React.useState(false)
+  const [rendered, set_rendered] = React.useState(false)
+
   const robotNameList = ["Model"]
   const [robotName,set_robotName] = React.useState(robotNameList[0])
 
-  const STATE_CODES = {
-    NORMAL: 0x00,           // 正常状态
-    IK_FAILED: 0x01,        // IK 求解失败
-    VELOCITY_LIMIT: 0x02,   // 达到速度上限
-    JOINT_LIMIT: 0x03,      // 关节限制
-  };
+  const [robot_model_left, setRobotModelLeft] = React.useState("agilex_piper");
+  const [robot_model_right, setRobotModelRight] = React.useState("agilex_piper");
+
+  const [robotParams, setRobotParams] = React.useState({
+    left: null,  // left control robot parameters
+    right: null, // right control robot parameters
+  });
+
+  React.useEffect(() => {
+    const leftParams = loadRobotParams(robot_model_left);
+    const rightParams = loadRobotParams(robot_model_right);
+    setRobotParams((prev) => ({
+      ...prev,
+      left: leftParams,
+      right: rightParams,
+    }));
+  }, [robot_model_left, robot_model_right]);
+
+  React.useEffect(() => {
+    if (robotParams.left !== null && robotParams.right !== null) {
+      console.log("Load Robot Params Left:", robotParams.left);
+      console.log("Load Robot Params Right:", robotParams.right);
+    }
+  }, [robotParams.left, robotParams.right]);
+
   const [error_code, setErrorCode] = React.useState(STATE_CODES.NORMAL);
   const [error_code_left, setErrorCodeLeft] = React.useState(STATE_CODES.NORMAL);
 
@@ -152,275 +297,90 @@ export default function DynamicHome(props) {
   /*** Robot Controller ***/
   const [robotState, setRobotState] = React.useState(null);
 
-  const [theta_body_initial, setThetaBodyInitial] = React.useState([0, -0.27473, 1.44144, 0, 1.22586, 0]);
-  const [theta_body, setThetaBody] = React.useState(theta_body_initial);
+  const [theta_body, setThetaBody] = React.useState([0, 0, 0, 0, 0, 0]);
+  const [theta_tool, setThetaTool] = React.useState(0);
 
-  const [theta_body_initial_left, setThetaBodyInitialLeft] = React.useState([0, -0.27473, 1.44144, 0, 1.22586, 0]);
-  const [theta_body_left, setThetaBodyLeft] = React.useState(theta_body_initial_left);
-
-  React.useEffect(() => {
-    console.log("theta_body_right updated:", theta_body);
-  }, [theta_body]);
-
-  React.useEffect(() => {
-    console.log("theta_body_left updated:", theta_body_left);
-  }, [theta_body_left]);
-
-  const theta_tool_inital = 0;
-  const [theta_tool, setThetaTool] = React.useState(theta_tool_inital);
-
-  const theta_tool_inital_left = 0;
-  const [theta_tool_left, setThetaToolLeft] = React.useState(theta_tool_inital_left);
+  const [theta_body_left, setThetaBodyLeft] = React.useState([0, 0, 0, 0, 0, 0]);
+  const [theta_tool_left, setThetaToolLeft] = React.useState(0);
 
   // Theta guess for Newton's method in inverse kinematics
-  const [theta_body_guess, setThetaBodyGuess] = React.useState(theta_body);
-  const [theta_body_guess_left, setThetaBodyGuessLeft] = React.useState(theta_body_left);
+  const [theta_body_guess, setThetaBodyGuess] = React.useState([0, 0, 0, 0, 0, 0]);
+  const [theta_body_guess_left, setThetaBodyGuessLeft] = React.useState([0, 0, 0, 0, 0, 0]);
 
-  /*** Dynamics VR Animation ***/
-  const [qHistQueue, setQHistQueue] = React.useState([]);
-  const animatingRef = React.useRef(false);
-  React.useEffect(() => {
-    if (animatingRef.current) return;
-    if (qHistQueue.length === 0) return;
-    animatingRef.current = true;
-    const q_hist = qHistQueue[0];
-    let idx = 0;
-    function animate() {
-      if (!q_hist) return;
-      if (idx < q_hist.length) {
-        setThetaBody(q_hist[idx]);
-        idx += 1;
-        // console.log('setThetaBody:', idx, q_hist.length, q_hist[idx]);
-        setTimeout(animate, 1); 
-      } else {
-        setThetaBodyGuess(q_hist[q_hist.length - 1]);
-        animatingRef.current = false;
-        setQHistQueue(queue => queue.slice(1));
-      }
-    }
-    animate();
-  }, [qHistQueue]);
-
-  /* ---------------- Robot right ---------------------------------------*/
-  // Foward Kinematics solution
-  const T0 = mr.FKinBody(M, Blist, theta_body);
-  const [R0, p0] = mr.TransToRp(T0);
-
-  // Position and orientation (euler angle) of end effector
-  const position_ee_initial = p0
-  const [position_ee, setPositionEE] = React.useState(position_ee_initial);
-
-  const R_ee_initial = R0; // Initial rotation matrix of end effector
-  const [R_ee, setREE] = React.useState(R_ee_initial);
+  /* ---------------------- Right Arm Initialize ------------------------------------*/
+  const [position_ee, setPositionEE] = React.useState([0,0,0]);
+  const [euler_ee, setEuler] = React.useState([0,0,0]);
+  const [R_ee, setREE] = React.useState(
+    [1,0,0],
+    [0,1,0],
+    [0,0,1]
+  );
 
   const position_ee_Three = mr.worlr2three(position_ee);
-
-  const euler_ee_initial = mr.RotMatToEuler(R0, Euler_order); 
-  const [euler_ee, setEuler] = React.useState(euler_ee_initial);
   const euler_ee_Three = mr.worlr2three(euler_ee);
 
-  // Update end effector position and orientation (for webcontroller)
   React.useEffect(() => {
-    const T = mr.FKinBody(M, Blist, theta_body);
-    const [R, p] = mr.TransToRp(T);
-    setPositionEE(p);
-    setEuler(mr.RotMatToEuler(R, Euler_order)); // Update to ZYX Euler angles
-    setREE(R);
-    }, [theta_body]);
-  
-  /* ---------------- Robot Left ---------------------------------------*/
-  const T0_left = mr.FKinBody(M, Blist, theta_body_left);
-  const [R0_left, p0_left] = mr.TransToRp(T0_left);
+    if (robotParams.left !== null && robotParams.right !== null) {
+      const T0 = FK(robotParams.right, robotParams.right.jointInitial, VR_Control_Mode);
+      const [R0, p0] = mr.TransToRp(T0);
+      setThetaBody(robotParams.right.jointInitial);
+      setThetaBodyGuess(robotParams.right.jointInitial);
+      setPositionEE(p0);
+      setREE(R0);
+      setEuler(mr.RotMatToEuler(R0, Euler_order));
+      console.log("Right Robot Arm Initialized");
+    }
+  }, [robotParams.left, robotParams.right]);
 
-  // Position and orientation (euler angle) of end effector
-  const position_ee_initial_left = p0_left
-  const [position_ee_left, setPositionEELeft] = React.useState(position_ee_initial_left);
+  React.useEffect(() => {
+    if (rendered) {
+      const T_right = FK(robotParams.right, theta_body, VR_Control_Mode);
+      const [R_right, p] = mr.TransToRp(T_right);
+      setPositionEE(p);
+      setEuler(mr.RotMatToEuler(R_right, Euler_order)); 
+      setREE(R_right);
+    }
+  }, [rendered, theta_body]);
 
-  const R_ee_initial_left = R0_left; // Initial rotation matrix of end effector
-  const [R_ee_left, setREELeft] = React.useState(R_ee_initial_left);
+  /* ---------------------- Left Arm Initialize ------------------------------------*/
+  const [position_ee_left, setPositionEELeft] = React.useState([0,0,0]);
+  const [euler_ee_left, setEulerEELeft] = React.useState([0,0,0]);
+  const [R_ee_left, setREELeft] = React.useState(
+    [1,0,0],
+    [0,1,0],
+    [0,0,1]
+  );
 
   const position_ee_Three_left = mr.worlr2three(position_ee_left);
-
-  const euler_ee_initial_left = mr.RotMatToEuler(R0_left, Euler_order); 
-  const [euler_ee_left, setEulerLeft] = React.useState(euler_ee_initial_left);
   const euler_ee_Three_left = mr.worlr2three(euler_ee_left);
 
-  // Update end effector position and orientation (for webcontroller)
   React.useEffect(() => {
-    const T_left = mr.FKinBody(M, Blist, theta_body_left);
-    const [R_left, p_left] = mr.TransToRp(T_left);
-    setPositionEELeft(p_left);
-    setEulerLeft(mr.RotMatToEuler(R_left, Euler_order)); // Update to ZYX Euler angles
-    setREELeft(R_left);
-    }, [theta_body_left]);
-  
-  /**
-   *  Control Methods
-   * /
-   * 
-  /** Kinamatics Control **/
-  function KinematicsControl_joint_velocity_limit(T_sd) {
-    let thetalist_sol, ik_success;
-    const max_joint_velocity = 5.5; // Maximum joint velocity limit
-
-    if (VR_Control_Mode === 'inBody') {
-      [thetalist_sol, ik_success] = mr.IKinBody(Blist, M, T_sd, theta_body_guess, 1e-5, 1e-5);
-    } 
-    else if (VR_Control_Mode === 'inSpace') {
-      [thetalist_sol, ik_success] = mr.IKinSpace(Slist, M, T_sd, theta_body_guess, 1e-5, 1e-5);
+    if (robotParams.left !== null && robotParams.right !== null) {
+      const T0_left = FK(robotParams.left, robotParams.left.jointInitial, VR_Control_Mode);
+      const [R0_left, p0_left] = mr.TransToRp(T0_left);
+      setThetaBodyLeft(robotParams.left.jointInitial);
+      setThetaBodyGuessLeft(robotParams.left.jointInitial);
+      setPositionEELeft(p0_left);
+      setREELeft(R0_left);
+      setEulerEELeft(mr.RotMatToEuler(R0_left, Euler_order));
+      console.log("Left Robot Arm Initialized");
     }
-    // console.log("IK Solution:", thetalist_sol, "Success:", ik_success);
+  }, [robotParams.left, robotParams.right]);
 
-    if (ik_success) {
-      const thetalist_sol_limited = thetalist_sol.map((theta, i) =>
-      Math.max(jointLimits[i].min, Math.min(jointLimits[i].max, theta))
-      );
-
-      const delta_theta_body = thetalist_sol_limited.map((theta, i) => theta - theta_body[i]);
-      const d_theta_body = delta_theta_body.map((val) => val / dt);
-      // console.log("Velocity Theta Body:", d_theta_body);
-
-      const [joint_ometahat, joint_theta] = mr.AxisAng3(d_theta_body);
-      // console.log("Joint Ometahat:", joint_ometahat, "Joint Theta:", joint_theta);
-
-      const joint_theta_limited = Math.max(0, Math.min(max_joint_velocity, joint_theta));
-
-      const new_theta_body = theta_body.map((theta, i) => theta + joint_ometahat[i] * joint_theta_limited * dt);
-
-      setThetaBody(new_theta_body);
-      setThetaBodyGuess(new_theta_body);
-      setErrorCode(STATE_CODES.NORMAL);
-
-      if (joint_theta_limited == max_joint_velocity) {
-        setErrorCode(STATE_CODES.VELOCITY_LIMIT);
-      } 
+  React.useEffect(() => {
+    if (rendered){
+      const T_left = FK(robotParams.left, theta_body_left, VR_Control_Mode);
+      const [R_left, p_left] = mr.TransToRp(T_left);
+      setPositionEELeft(p_left);
+      setEulerEELeft(mr.RotMatToEuler(R_left, Euler_order)); 
+      setREELeft(R_left);
     }
-    else if (!ik_success) {
-        console.warn("Right IK failed to converge");
-        setErrorCode(STATE_CODES.IK_FAILED);
-      } 
-  }
+  }, [rendered, theta_body_left]);
 
-  function KinematicsControl_joint_velocity_limit_left(T_sd) {
-    let thetalist_sol, ik_success;
-    const max_joint_velocity = 5.5; // Maximum joint velocity limit
-
-    if (VR_Control_Mode === 'inBody') {
-      [thetalist_sol, ik_success] = mr.IKinBody(Blist, M, T_sd, theta_body_guess_left, 1e-5, 1e-5);
-    } 
-    else if (VR_Control_Mode === 'inSpace') {
-      [thetalist_sol, ik_success] = mr.IKinSpace(Slist, M, T_sd, theta_body_guess_left, 1e-5, 1e-5);
-    }
-    // console.log("IK Solution:", thetalist_sol, "Success:", ik_success);
-
-    if (ik_success) {
-      const thetalist_sol_limited = thetalist_sol.map((theta, i) =>
-      Math.max(jointLimits[i].min, Math.min(jointLimits[i].max, theta))
-      );
-
-      const delta_theta_body = thetalist_sol_limited.map((theta, i) => theta - theta_body_left[i]);
-      const d_theta_body = delta_theta_body.map((val) => val / dt);
-      // console.log("Velocity Theta Body:", d_theta_body);
-
-      const [joint_ometahat, joint_theta] = mr.AxisAng3(d_theta_body);
-      // console.log("Joint Ometahat:", joint_ometahat, "Joint Theta:", joint_theta);
-
-      const joint_theta_limited = Math.max(0, Math.min(max_joint_velocity, joint_theta));
-
-      const new_theta_body = theta_body_left.map((theta, i) => theta + joint_ometahat[i] * joint_theta_limited * dt);
-
-      setThetaBodyLeft(new_theta_body);
-      setThetaBodyGuessLeft(new_theta_body);
-      setErrorCodeLeft(STATE_CODES.NORMAL);
-
-      if (joint_theta_limited == max_joint_velocity) {
-        setErrorCodeLeft(STATE_CODES.VELOCITY_LIMIT);
-      } 
-    }
-    else if (!ik_success) {
-      console.warn("Left IK failed to converge");
-      setErrorCodeLeft(STATE_CODES.IK_FAILED);
-    }
-  }
-
-  /** Dynamics Control **/
-  function DynamicsControl(newPos, newEuler) {
-    const T_sd = mr.RpToTrans(mr.EulerToRotMat(newEuler, Euler_order), newPos);
-    const [thetalist_sol, ik_success] = mr.IKinBody(Blist, M, T_sd, theta_body_guess, 1e-5, 1e-5);
-
-    const thetalist_sol_limited = thetalist_sol.map((theta, i) =>
-      Math.max(jointLimits[i].min, Math.min(jointLimits[i].max, theta))
-      );
-
-    const dt = 0.01;
-    const steps = 200;
-
-    const q0 = theta_body.slice();
-    const dq0 = Array(q0.length).fill(0);
-
-    const q_ref = thetalist_sol_limited.slice();
-    const dq_ref = Array(q0.length).fill(0);
-    
-    const [q_hist, dq_hist] = mr.simulate_PIDcontrol(q0, dq0, q_ref, dq_ref, dt, steps, Mlist, Glist, Slist, Kplist, Kilist, Kdlist)
-
-    if (ik_success) {
-      setQHistQueue(queue => [...queue, q_hist]); 
-    } 
-    else {
-      console.warn("IK failed to converge");
-    }
-  }
-
-  /*============================= VR Robot Control ==========================================*/
+  /*============================= VR Right Robot Arm Control ==========================================*/
   // Update VR controller position and rotation matrix
   // !! Do not use Euler angle, since it can cause gimbal lock !!
-  /**
-   * VR Controller Relative Rotation Matrix Update
-   * @param {Array<number>} controller_object.quaternion // controller quaternion in 3D space
-   * @returns {Array<number>} vr_controller_R_relative   // Return the relative Rotation Matrix of the VR controller
-   */
-
-  function getVRControllerRotationMatrix(vr_controller_quat, VR_Control_Mode) {
-    // Current VR controller quaternion
-    // const vr_controller_quat = controller_object.quaternion;
-    
-    // Initial offset quaternion to correct the VR controller orientation
-    const initialOffsetQuat = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler((0.6654549523360951 * -1), 0, 0, Euler_order)
-    );
-    const vrQuat = new THREE.Quaternion().multiplyQuaternions(vr_controller_quat, initialOffsetQuat);
-
-    // Transform vr controller's frame to world frame
-    const worldOffsetQuat = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler((Math.PI/2 * -1), Math.PI/2, 0, Euler_order)
-    );
-    const spaceQuat = new THREE.Quaternion().multiplyQuaternions(vrQuat, worldOffsetQuat);
-
-    // Offset quaternion to correct the end effector orientation
-    const bodyOffsetQuat = new THREE.Quaternion().setFromEuler(
-      new THREE.Euler( Math.PI, 0, Math.PI, Euler_order)
-    );
-    const bodyQuat = new THREE.Quaternion().multiplyQuaternions(spaceQuat, bodyOffsetQuat);
-
-    // Transform the corrected quaternion to a rotation matrix
-    const matrix = new THREE.Matrix4();
-    if (VR_Control_Mode === 'inSpace') {
-      matrix.makeRotationFromQuaternion(spaceQuat);
-    } else if (VR_Control_Mode === 'inBody') {
-      matrix.makeRotationFromQuaternion(bodyQuat);
-    }
-
-    // The columns of the rotation matrix represent the axes of the controller
-    const elements = matrix.elements;
-    const vr_controller_R_current = [
-      [elements[0], elements[4], elements[8]],
-      [elements[1], elements[5], elements[9]],
-      [elements[2], elements[6], elements[10]]
-    ];
-    return vr_controller_R_current;
-  }
-
-  /*-----------------------Right Arm Control---------------------------------------*/
+  
   /*** Position Update ***/
   const vr_controller_pos = [
   controller_object.position.x,
@@ -465,7 +425,7 @@ export default function DynamicHome(props) {
   ]);
 
   /*** Rotation Update ***/
-  const vr_controller_R_current = getVRControllerRotationMatrix(controller_object.quaternion, VR_Control_Mode);
+  const vr_controller_R_current = vrquatToR(controller_object.quaternion, VR_Control_Mode);
 
   // Store initial rotation matrix when trigger is first pressed
   const lastRotationMatrixRef = React.useRef(null);
@@ -523,14 +483,15 @@ export default function DynamicHome(props) {
     if (rendered && vrModeRef.current && !trigger_on && lastVRPosRef.current) {
       lastVRPosRef.current = null;
       lastRotationMatrixRef.current = null;
+      setVRControllerPosDiff([0, 0, 0]);
+      setVRControllerRmatrixRelative(
+        [[1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1]]
+      );
     }
   }, [trigger_on, rendered, vrModeRef.current]);
 
-  // Output: vr_controller_p_diff and vr_controller_R_relative
-  // console.log("VR Controller Position Diff:", vr_controller_p_diff);
-  // console.log("VR Controller Relative Rotation Matrix:", vr_controller_R_relative);
-
-  /*============================= Right Robot Control ==========================================*/
   React.useEffect(() => {
     if (rendered && vrModeRef.current && trigger_on) {
       const currentP = [...position_ee];
@@ -550,10 +511,6 @@ export default function DynamicHome(props) {
       const [R_screw, R_theta] = mynp.relativeRMatrixtoScrewAxis(vr_controller_R_relative);
       const R_relative = mynp.ScrewAxisToRelativeRMatrix(R_screw, R_theta * R_scale); // Scale factor for rotation
 
-      // console.log("vr_controller_R_relative:", vr_controller_R_relative);
-      // console.log("R_screw:", R_screw);
-      // console.log("R_theta:", R_theta);
-
       // Calculate the new orientation based on the relative rotation matrix
       let newT;
       if (VR_Control_Mode === 'inSpace') {
@@ -568,14 +525,20 @@ export default function DynamicHome(props) {
         console.warn("Invalid VR Control Mode, choose 'inSpace' or 'inBody'. Current:", VR_Control_Mode);
         return;
       }
-      KinematicsControl_joint_velocity_limit(newT);
+
+      const { new_theta_body, error_code } = IK_joint_velocity_limit(newT, robotParams.right, theta_body, theta_body_guess, VR_Control_Mode);
+      setThetaBody(new_theta_body);
+      setThetaBodyGuess(new_theta_body);
+      setErrorCode(error_code);
     }
   }, [
     vr_controller_p_diff,
     vr_controller_R_relative,
     rendered, 
     trigger_on,
-    vrModeRef.current
+    vrModeRef.current,
+    lastVRPosRef.current,
+    lastRotationMatrixRef.current,
   ]);
 
   // Tool Control 
@@ -599,16 +562,8 @@ export default function DynamicHome(props) {
     };
   }, [ button_a_on, button_b_on, grip_on]);
 
-  // Update theta_body when robotState is "initialize"
-  const [theta_body_feedback, setThetaBodyFeedback] = React.useState(theta_body_initial);
-  React.useEffect(() => {
-    if (robotState === "initialize") {
-      setThetaBody(theta_body_feedback)
-    }
-  }, [robotState]);
 
-
-  /*-----------------------Left Arm Control---------------------------------------*/
+/*============================= VR Left Robot Arm Control ==========================================*/
   /*** Position Update ***/
   const vr_controller_pos_left = [
   controller_object_left.position.x,
@@ -637,7 +592,6 @@ export default function DynamicHome(props) {
         ];
 
         const pos_diff_world_left = mr.three2world(pos_diff_left);
-        console.log("VR Controller Position Diff:", pos_diff_world_left);
 
         // Update last frame position
         lastVRPosRef_left.current = [...vr_controller_pos_left];
@@ -653,7 +607,7 @@ export default function DynamicHome(props) {
   ]);
 
   /*** Rotation Update ***/
-  const vr_controller_R_current_left = getVRControllerRotationMatrix(controller_object_left.quaternion, VR_Control_Mode);
+  const vr_controller_R_current_left = vrquatToR(controller_object_left.quaternion, VR_Control_Mode);
 
   // Store initial rotation matrix when trigger is first pressed
   const lastRotationMatrixRef_left = React.useRef(null);
@@ -711,6 +665,12 @@ export default function DynamicHome(props) {
     if (rendered && vrModeRef.current && !trigger_on_left && lastVRPosRef_left.current) {
       lastVRPosRef_left.current = null;
       lastRotationMatrixRef_left.current = null;
+      setVRControllerPosDiffLeft([0, 0, 0]);
+      setVRControllerRmatrixRelativeLeft(
+        [[1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1]]
+      );
     }
   }, [trigger_on_left, rendered, vrModeRef.current]);
 
@@ -734,25 +694,26 @@ export default function DynamicHome(props) {
       const [R_screw_left, R_theta_left] = mynp.relativeRMatrixtoScrewAxis(vr_controller_R_relative_left);
       const R_relative_left = mynp.ScrewAxisToRelativeRMatrix(R_screw_left, R_theta_left * R_scale); // Scale factor for rotation
 
-      // console.log("vr_controller_R_relative:", vr_controller_R_relative);
-      // console.log("R_screw:", R_screw);
-      // console.log("R_theta:", R_theta);
-
       // Calculate the new orientation based on the relative rotation matrix
-      let newT_left;
+      let newT;
       if (VR_Control_Mode === 'inSpace') {
         const newR_inSpace = mr.matDot(R_relative_left, currentR_left);
-        newT_left = mr.RpToTrans(newR_inSpace, newP);
+        newT = mr.RpToTrans(newR_inSpace, newP);
       }
       else if (VR_Control_Mode === 'inBody') {
         const newR_inBody = mr.matDot(currentR_left, R_relative_left);
-        newT_left = mr.RpToTrans(newR_inBody, newP);
+        newT = mr.RpToTrans(newR_inBody, newP);
       }
       else {
         console.warn("Invalid VR Control Mode, choose 'inSpace' or 'inBody'. Current:", VR_Control_Mode);
         return;
       }
-      KinematicsControl_joint_velocity_limit_left(newT_left);
+
+      // Update Joint Angles with IK
+      const { new_theta_body, error_code } = IK_joint_velocity_limit(newT, robotParams.left, theta_body_left, theta_body_guess_left, VR_Control_Mode);
+      setThetaBodyLeft(new_theta_body);
+      setThetaBodyGuessLeft(new_theta_body);
+      setErrorCodeLeft(error_code);
     }
   }, [
     vr_controller_p_diff_left,
@@ -780,7 +741,8 @@ export default function DynamicHome(props) {
     };
   }, [ button_x_on, button_y_on, grip_on_left]);
 
-  /* ============================== MQTT Protocal ==========================================*/
+
+/* ============================== MQTT Protocal ==========================================*/
   // webController Inputs
   const controllerProps = React.useMemo(() => ({
     robotName, robotNameList, set_robotName,
@@ -793,8 +755,7 @@ export default function DynamicHome(props) {
     theta_tool, setThetaTool,
     position_ee, setPositionEE,
     euler_ee, setEuler,
-    // onTargetChange: KinematicsControl,
-    onTargetChange: DynamicsControl
+    // onTargetChange: KinematicsControl_joint_velocity_limit,
   }), [
     robotName, robotNameList, set_robotName,
     toolName, toolNameList, set_toolName,
@@ -806,8 +767,7 @@ export default function DynamicHome(props) {
     theta_tool, setThetaTool,
     position_ee, setPositionEE,
     euler_ee, setEuler,
-    // KinematicsControl,
-    DynamicsControl
+    // KinematicsControl_joint_velocity_limit,
   ]);
 
   // VRController Inputs (Aframe Components)
@@ -894,6 +854,14 @@ export default function DynamicHome(props) {
     publishMQTT(MQTT_REQUEST_TOPIC, JSON.stringify(requestInfo));
   }
 
+  // Update theta_body when robotState is "initialize"
+  const [theta_body_feedback, setThetaBodyFeedback] = React.useState([0, 0, 0, 0, 0, 0]);
+  React.useEffect(() => {
+    if (robotState === "initialize") {
+      setThetaBody(theta_body_feedback)
+    }
+  }, [robotState]);
+
   useMqtt({
     props,
     requestRobot,
@@ -907,7 +875,7 @@ export default function DynamicHome(props) {
     MQTT_ROBOT_STATE_TOPIC,
   });
 
-  /* ============================= Robot State Update ==========================================*/
+/* ============================= Robot State Update ==========================================*/
   // Robot State Update Props
   const robotProps = React.useMemo(() => ({
     robotNameList, robotName, theta_body, theta_tool, theta_body_left, theta_tool_left,
