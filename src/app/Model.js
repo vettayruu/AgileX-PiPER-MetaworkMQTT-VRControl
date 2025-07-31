@@ -150,22 +150,36 @@ const Model = (props) => {
         ></a-plane>
 
         {/* Robot Base */}
-        <a-entity robot-click="" gltf-model="#base" position={'0 0 0'} visible="true">
+        <a-entity robot-click="" id={`${robotId}_base`}  gltf-model="#base" position={'0 0 0'} visible="true"
+          // joint-collision-check={`target: #${robotId === 'agilex_piper_left' ? 'agilex_piper_right_base' : 'agilex_piper_left_base'}`}
+          >
           {/* J1 */}
-          <a-entity j_id="1" gltf-model="#j1" position={'0 0 0'} rotation={`0 ${theta1-180} 0`}>
+          <a-entity j_id="1" id={`${robotId}_j1`} gltf-model="#j1" position={'0 0 0'} rotation={`0 ${theta1-180} 0`}
+            // joint-collision-check={`target: #${robotId === 'agilex_piper_left' ? 'agilex_piper_right_j1' : 'agilex_piper_left_j1'}`}
+            >
             {/* J2 */}
-            <a-entity j_id="2" gltf-model="#j2" position={`0 ${L_01} 0`} rotation={`${theta2} 0 0`}>
+            <a-entity j_id="2" id={`${robotId}_j2`} gltf-model="#j2" position={`0 ${L_01} 0`} rotation={`${theta2} 0 0`}
+              // joint-collision-check={`target: #${robotId === 'agilex_piper_left' ? 'agilex_piper_right_j2' : 'agilex_piper_left_j2'}`}
+              >
               {/* J3 */}
-              <a-entity j_id="3" gltf-model="#j3" position={`0 ${L_23} 0`} rotation={`${theta3} 0 0`}>
+              <a-entity j_id="3" id={`${robotId}_j3`} gltf-model="#j3" position={`0 ${L_23} 0`} rotation={`${theta3} 0 0`}
+                // joint-collision-check={`target: #${robotId === 'agilex_piper_left' ? 'agilex_piper_right_j3' : 'agilex_piper_left_j3'}`}
+                >
                 {/* J4 */}
-                <a-entity j_id="4" gltf-model="#j4" position={`0 ${L_34} -${W_34}`} rotation={`0 ${theta4} 0`}>
+                <a-entity j_id="4" id={`${robotId}_j4`} gltf-model="#j4" position={`0 ${L_34} -${W_34}`} rotation={`0 ${theta4} 0`}
+                  // joint-collision-check={`target: #${robotId === 'agilex_piper_left' ? 'agilex_piper_right_j4' : 'agilex_piper_left_j4'}`}
+                  >
                   {/* J5 */}
-                  <a-entity j_id="5" gltf-model="#j5" position={`0 0 0`} rotation={`${theta5-90} 0 0`}>
+                  <a-entity j_id="5" id={`${robotId}_j5`} gltf-model="#j5" position={`0 0 0`} rotation={`${theta5-90} 0 0`}
+                    // joint-collision-check={`target: #${robotId === 'agilex_piper_left' ? 'agilex_piper_right_j5' : 'agilex_piper_left_j5'}`}
+                    >
                     {/* J6 */}
-                    <a-entity j_id="6" gltf-model="#j6" position={`0 0 0`} rotation={`0 0 ${theta6}`}>
+                    <a-entity j_id="6" id={`${robotId}_j6`} gltf-model="#j6" position={`0 0 0`} rotation={`0 0 ${theta6}`}
+                      joint-collision-check={`target: #${robotId === 'agilex_piper_left' ? 'agilex_piper_right_j6' : 'agilex_piper_left_j6'}`}
+                      show-collision-box="xPad: 0.0; yPad: 0.03; zPad: 0.0; color: #ff00ff">
                       {/* Tool */}
-                      <a-entity gltf-model="#j6_1" position={`${finger_pos} 0 ${L_56+L_ee}`}></a-entity>
-                      <a-entity gltf-model="#j6_2" position={`${-finger_pos} 0 ${L_56+L_ee}`}></a-entity>
+                      <a-entity id={`${robotId}_j6_1`} gltf-model="#j6_1" position={`${finger_pos} 0 ${L_56+L_ee}`}></a-entity>
+                      <a-entity id={`${robotId}_j6_2`} gltf-model="#j6_2" position={`${-finger_pos} 0 ${L_56+L_ee}`}></a-entity>
                     </a-entity>
                   </a-entity>
                 </a-entity>

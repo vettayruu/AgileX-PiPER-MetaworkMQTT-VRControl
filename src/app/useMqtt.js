@@ -7,7 +7,7 @@ export default function useMqtt({
   thetaBodyMQTT,
   thetaToolMQTT,
   thetaBodyFeedback,
-  robotState,
+  robot_state,
   robotIDRef,
   MQTT_DEVICE_TOPIC,
   MQTT_CTRL_TOPIC,
@@ -70,7 +70,7 @@ export default function useMqtt({
     if (!props.viewer && topic === MQTT_ROBOT_STATE_TOPIC + robotIDRef.current) {
       if (data.state != undefined) {
         console.log("Robot state:", data.state);
-        robotState(data.state);
+        robot_state(data.state);
       }
       if (data.model != undefined) {
         console.log("Robot model:", data.model);

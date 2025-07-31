@@ -32,10 +32,10 @@ const MQTT_ROBOT_STATE_TOPIC = "robot/";
 
 // IK State Codes
 const STATE_CODES = {
-  NORMAL: 0x00,           // 正常状态
-  IK_FAILED: 0x01,        // IK 求解失败
-  VELOCITY_LIMIT: 0x02,   // 达到速度上限
-  JOINT_LIMIT: 0x03,      // 关节限制
+  NORMAL: 0x00,
+  IK_FAILED: 0x01,
+  VELOCITY_LIMIT: 0x02,
+  JOINT_LIMIT: 0x03,
 };
 
 /* ============================= Functions ==========================================*/
@@ -76,7 +76,7 @@ function FK(robotParams, theta_body, VR_Control_Mode) {
 }
 
 /** IK **/
-function IK_joint_velocity_limit(T_sd, robotParams, theta_body, theta_body_guess, VR_Control_Mode) {
+function IK_joint_velocity_limit(T_sd, robotParams, theta_body, VR_Control_Mode) {
   let thetalist_sol, ik_success;
   const max_joint_velocity = 5.5; // Maximum joint velocity limit
 
@@ -88,10 +88,10 @@ function IK_joint_velocity_limit(T_sd, robotParams, theta_body, theta_body_guess
   let error_code = STATE_CODES.NORMAL;
 
   if (VR_Control_Mode === 'inBody') {
-    [thetalist_sol, ik_success] = mr.IKinBody(Blist, M, T_sd, theta_body_guess, 1e-5, 1e-5);
+    [thetalist_sol, ik_success] = mr.IKinBody(Blist, M, T_sd, theta_body, 1e-5, 1e-5);
   } 
   else if (VR_Control_Mode === 'inSpace') {
-    [thetalist_sol, ik_success] = mr.IKinSpace(Slist, M, T_sd, theta_body_guess, 1e-5, 1e-5);
+    [thetalist_sol, ik_success] = mr.IKinSpace(Slist, M, T_sd, theta_body, 1e-5, 1e-5);
   }
 
   if (ik_success) {
@@ -155,12 +155,12 @@ function vrquatToR(vr_controller_quat, VR_Control_Mode) {
 
   // The columns of the rotation matrix represent the axes of the controller
   const elements = matrix.elements;
-  const vr_controller_R_current = [
+  const vr_controller_R = [
     [elements[0], elements[4], elements[8]],
     [elements[1], elements[5], elements[9]],
     [elements[2], elements[6], elements[10]]
   ];
-  return vr_controller_R_current;
+  return vr_controller_R;
 }
 
 
@@ -294,18 +294,19 @@ export default function DynamicHome(props) {
   }, []);
 
 
-  /*** Robot Controller ***/
-  const [robotState, setRobotState] = React.useState(null);
-
+  /* ---------------------- Control Parameters ------------------------------------*/
+  // Right Arm 
+  const [robot_state, setRobotState] = React.useState(null);
   const [theta_body, setThetaBody] = React.useState([0, 0, 0, 0, 0, 0]);
   const [theta_tool, setThetaTool] = React.useState(0);
 
+  // Left Arm
+  const [robot_state_left, setRobotStateLeft] = React.useState(null);
   const [theta_body_left, setThetaBodyLeft] = React.useState([0, 0, 0, 0, 0, 0]);
   const [theta_tool_left, setThetaToolLeft] = React.useState(0);
 
-  // Theta guess for Newton's method in inverse kinematics
-  const [theta_body_guess, setThetaBodyGuess] = React.useState([0, 0, 0, 0, 0, 0]);
-  const [theta_body_guess_left, setThetaBodyGuessLeft] = React.useState([0, 0, 0, 0, 0, 0]);
+  // Collision Check
+  const [collision, setCollision] = React.useState(false);
 
   /* ---------------------- Right Arm Initialize ------------------------------------*/
   const [position_ee, setPositionEE] = React.useState([0,0,0]);
@@ -324,7 +325,7 @@ export default function DynamicHome(props) {
       const T0 = FK(robotParams.right, robotParams.right.jointInitial, VR_Control_Mode);
       const [R0, p0] = mr.TransToRp(T0);
       setThetaBody(robotParams.right.jointInitial);
-      setThetaBodyGuess(robotParams.right.jointInitial);
+      // setThetaBodyGuess(robotParams.right.jointInitial);
       setPositionEE(p0);
       setREE(R0);
       setEuler(mr.RotMatToEuler(R0, Euler_order));
@@ -359,7 +360,7 @@ export default function DynamicHome(props) {
       const T0_left = FK(robotParams.left, robotParams.left.jointInitial, VR_Control_Mode);
       const [R0_left, p0_left] = mr.TransToRp(T0_left);
       setThetaBodyLeft(robotParams.left.jointInitial);
-      setThetaBodyGuessLeft(robotParams.left.jointInitial);
+      // setThetaBodyGuessLeft(robotParams.left.jointInitial);
       setPositionEELeft(p0_left);
       setREELeft(R0_left);
       setEulerEELeft(mr.RotMatToEuler(R0_left, Euler_order));
@@ -377,7 +378,8 @@ export default function DynamicHome(props) {
     }
   }, [rendered, theta_body_left]);
 
-  /*============================= VR Right Robot Arm Control ==========================================*/
+  /*======================= VR Right Robot Arm Control ====================================*/
+  /* ---------------------- Right VR Controller Motion ------------------------------------*/
   // Update VR controller position and rotation matrix
   // !! Do not use Euler angle, since it can cause gimbal lock !!
   
@@ -492,6 +494,7 @@ export default function DynamicHome(props) {
     }
   }, [trigger_on, rendered, vrModeRef.current]);
 
+  /* ---------------------- Right Arm VR Control ------------------------------------*/
   React.useEffect(() => {
     if (rendered && vrModeRef.current && trigger_on) {
       const currentP = [...position_ee];
@@ -526,9 +529,8 @@ export default function DynamicHome(props) {
         return;
       }
 
-      const { new_theta_body, error_code } = IK_joint_velocity_limit(newT, robotParams.right, theta_body, theta_body_guess, VR_Control_Mode);
+      const { new_theta_body, error_code } = IK_joint_velocity_limit(newT, robotParams.right, theta_body, VR_Control_Mode);
       setThetaBody(new_theta_body);
-      setThetaBodyGuess(new_theta_body);
       setErrorCode(error_code);
     }
   }, [
@@ -541,7 +543,7 @@ export default function DynamicHome(props) {
     lastRotationMatrixRef.current,
   ]);
 
-  // Tool Control 
+  /* ---------------------- Right Arm Tool VR Control ------------------------------------*/
   function clampTool(value) {
     return Math.max(toolLimit.min, Math.min(toolLimit.max, value));
   }
@@ -563,7 +565,8 @@ export default function DynamicHome(props) {
   }, [ button_a_on, button_b_on, grip_on]);
 
 
-/*============================= VR Left Robot Arm Control ==========================================*/
+  /*======================= VR Right Left Arm Control ====================================*/
+  /* ---------------------- Left VR Controller Motion ------------------------------------*/
   /*** Position Update ***/
   const vr_controller_pos_left = [
   controller_object_left.position.x,
@@ -674,7 +677,7 @@ export default function DynamicHome(props) {
     }
   }, [trigger_on_left, rendered, vrModeRef.current]);
 
-  /*============================= Right Robot Control ==========================================*/
+  /*---------------------------- Left Arm Control ----------------------------------------*/
   React.useEffect(() => {
     if (rendered && vrModeRef.current && trigger_on_left) {
       const currentP_left = [...position_ee_left];
@@ -710,9 +713,8 @@ export default function DynamicHome(props) {
       }
 
       // Update Joint Angles with IK
-      const { new_theta_body, error_code } = IK_joint_velocity_limit(newT, robotParams.left, theta_body_left, theta_body_guess_left, VR_Control_Mode);
+      const { new_theta_body, error_code } = IK_joint_velocity_limit(newT, robotParams.left, theta_body_left, VR_Control_Mode);
       setThetaBodyLeft(new_theta_body);
-      setThetaBodyGuessLeft(new_theta_body);
       setErrorCodeLeft(error_code);
     }
   }, [
@@ -723,7 +725,7 @@ export default function DynamicHome(props) {
     vrModeRef.current
   ]);
 
-  // Tool Control 
+  /*---------------------------- Left Arm Tool Control ----------------------------------------*/
   React.useEffect(() => {
     let intervalId = null;
     if (grip_on_left && button_x_on) {
@@ -741,9 +743,32 @@ export default function DynamicHome(props) {
     };
   }, [ button_x_on, button_y_on, grip_on_left]);
 
+  
+  const thetaHistoryRef = React.useRef([]);
+  const thetaLeftHistoryRef = React.useRef([]);
 
-/* ============================== MQTT Protocal ==========================================*/
-  // webController Inputs
+  React.useEffect(() => {
+    if (!collision) {
+      thetaHistoryRef.current.push(theta_body);
+      thetaLeftHistoryRef.current.push(theta_body_left);
+
+      if (thetaHistoryRef.current.length > 5) thetaHistoryRef.current.shift();
+      if (thetaLeftHistoryRef.current.length > 5) thetaLeftHistoryRef.current.shift();
+    } else if (collision) {
+      if (thetaHistoryRef.current.length > 0 && thetaLeftHistoryRef.current.length > 0) {
+        const last = thetaHistoryRef.current.pop();
+        const lastLeft = thetaLeftHistoryRef.current.pop();
+
+        setThetaBody(last);
+        setThetaBodyLeft(lastLeft);
+
+        console.warn("🔁 Return to last valid theta due to collision");
+      }
+    }
+  }, [collision, theta_body, theta_body_left]);
+
+
+  /* ------------------------- Web Controller Inputs -----------------------*/
   const controllerProps = React.useMemo(() => ({
     robotName, robotNameList, set_robotName,
     toolName, toolNameList, set_toolName,
@@ -770,38 +795,39 @@ export default function DynamicHome(props) {
     // KinematicsControl_joint_velocity_limit,
   ]);
 
-  // VRController Inputs (Aframe Components)
+  /* ------------------------- VRController Inputs (Aframe Components) -----------------------*/
   React.useEffect(() => {
     registerAframeComponents({
       set_rendered,
       robotChange,
+
       // Right Controller
-      controller_object,
       set_controller_object,
       set_trigger_on,
       set_grip_on,
       set_button_a_on,
       set_button_b_on,
+
       // Left Controller
-      controller_object_left,
       set_controller_object_left,
       set_trigger_on_left,
       set_grip_on_left,
       set_button_x_on,
       set_button_y_on,
 
+      //Collision Check
+      setCollision,
+
+      // VR Camera Pose
       set_c_pos_x, set_c_pos_y, set_c_pos_z,
       set_c_deg_x, set_c_deg_y, set_c_deg_z,
       vrModeRef,
-      Euler_order,
       props,
       onXRFrameMQTT,
     });
   }, []);
 
-  /* 
-  * MQTT 
-  */
+  /* ============================== MQTT Protocol ==========================================*/
   const thetaBodyMQTT = React.useRef(theta_body);
   React.useEffect(() => {
     thetaBodyMQTT.current = theta_body;
@@ -854,13 +880,13 @@ export default function DynamicHome(props) {
     publishMQTT(MQTT_REQUEST_TOPIC, JSON.stringify(requestInfo));
   }
 
-  // Update theta_body when robotState is "initialize"
+  // Update theta_body when robot_state is "initialize"
   const [theta_body_feedback, setThetaBodyFeedback] = React.useState([0, 0, 0, 0, 0, 0]);
   React.useEffect(() => {
-    if (robotState === "initialize") {
+    if (robot_state === "initialize") {
       setThetaBody(theta_body_feedback)
     }
-  }, [robotState]);
+  }, [robot_state]);
 
   useMqtt({
     props,
@@ -868,14 +894,14 @@ export default function DynamicHome(props) {
     thetaBodyMQTT: setThetaBody,
     thetaToolMQTT: setThetaTool,
     thetaBodyFeedback: setThetaBodyFeedback,
-    robotState: setRobotState,
+    robot_state: setRobotState,
     robotIDRef,
     MQTT_DEVICE_TOPIC, 
     MQTT_CTRL_TOPIC, 
     MQTT_ROBOT_STATE_TOPIC,
   });
 
-/* ============================= Robot State Update ==========================================*/
+  /* ============================= Robot State Update ==========================================*/
   // Robot State Update Props
   const robotProps = React.useMemo(() => ({
     robotNameList, robotName, theta_body, theta_tool, theta_body_left, theta_tool_left,
@@ -890,8 +916,6 @@ export default function DynamicHome(props) {
       <RobotScene
         robot_model={robot_model}
         rendered={rendered}
-        state_codes={error_code}
-        state_codes_left={error_code_left}
 
         robotProps={robotProps}
         controllerProps={controllerProps}
@@ -905,11 +929,15 @@ export default function DynamicHome(props) {
         viewer={props.viewer}
         monitor={props.monitor}
 
+        // Right Arm
+        state_codes={error_code}
         position_ee={position_ee_Three}
         euler_ee={euler_ee_Three}
         vr_controller_pos={vr_controller_pos}
         vr_controller_R={vr_controller_R_current}
 
+        // Left Arm
+        state_codes_left={error_code_left}
         position_ee_left={position_ee_Three_left}
         euler_ee_left={euler_ee_Three_left}
         vr_controller_pos_left={vr_controller_pos_left}

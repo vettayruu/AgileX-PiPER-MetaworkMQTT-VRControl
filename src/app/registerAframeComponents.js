@@ -7,24 +7,29 @@ export default function registerAframeComponents(options) {
   const {
     set_rendered,
     robotChange,
+
     // Right Controller
-    controller_object,
     set_controller_object,
     set_trigger_on,
     set_grip_on,
     set_button_a_on,
     set_button_b_on,
+
     // Left Controller
-    controller_object_left,
     set_controller_object_left,
     set_trigger_on_left,
     set_grip_on_left,
     set_button_x_on,
     set_button_y_on,
+
+    // Collision Check
+    collision,
+    setCollision,
+    
+    // Camera
     set_c_pos_x, set_c_pos_y, set_c_pos_z,
     set_c_deg_x, set_c_deg_y, set_c_deg_z,
     vrModeRef,
-    Euler_order,
     props,
     onXRFrameMQTT,
   } = options;
@@ -44,8 +49,6 @@ export default function registerAframeComponents(options) {
   AFRAME.registerComponent('vr-controller-right', {
     schema: { type: 'string', default: '' },
     init: function () {
-      set_controller_object(this.el.object3D);
-      this.el.object3D.rotation.order = Euler_order;
       // Trigger 
       this.el.addEventListener('triggerdown', () => set_trigger_on(true));
       this.el.addEventListener('triggerup', () => set_trigger_on(false));
@@ -61,23 +64,14 @@ export default function registerAframeComponents(options) {
       this.el.addEventListener('bbuttonup', () => set_button_b_on(false));
 
     },
-    update: function () {
-      if (this.el.object3D !== controller_object) {
-        set_controller_object(this.el.object3D);
-      }
-    },
-    tick: function (time, timeDelta) {
-      if (timeDelta >= 16.67) {
-        set_controller_object(this.el.object3D);
-      }
+    tick: function () {
+      set_controller_object(this.el.object3D);
     }
   });
 
     AFRAME.registerComponent('vr-controller-left', {
     schema: { type: 'string', default: '' },
     init: function () {
-      set_controller_object(this.el.object3D);
-      this.el.object3D.rotation.order = Euler_order;
       // Trigger 
       this.el.addEventListener('triggerdown', () => set_trigger_on_left(true));
       this.el.addEventListener('triggerup', () => set_trigger_on_left(false));
@@ -86,23 +80,13 @@ export default function registerAframeComponents(options) {
       this.el.addEventListener('gripdown', () => set_grip_on_left(true));
       this.el.addEventListener('gripup', () => set_grip_on_left(false));
 
-      // A/B
+      // X/Y
       this.el.addEventListener('xbuttondown', () => set_button_x_on(true));
       this.el.addEventListener('xbuttonup', () => set_button_x_on(false));
       this.el.addEventListener('ybuttondown', () => set_button_y_on(true));
       this.el.addEventListener('ybuttonup', () => set_button_y_on(false));
 
     },
-    // update: function () {
-    //   if (this.el.object3D !== controller_object_left) {
-    //     set_controller_object_left(this.el.object3D);
-    //   }
-    // },
-    // tick: function (time, timeDelta) {
-    //   if (timeDelta >= 16.67) {
-    //     set_controller_object_left(this.el.object3D);
-    //   }
-    // }
     tick: function () {
       set_controller_object_left(this.el.object3D);
     }
@@ -200,4 +184,129 @@ export default function registerAframeComponents(options) {
       });
     },
   });
+
+  // AFRAME.registerComponent('joint-collision-check', {
+  //   schema: {
+  //     target: { type: 'selector' } 
+  //   },
+  //   tick: function () {
+  //     const meshA = this.el.getObject3D('mesh');
+  //     const meshB = this.data.target?.getObject3D('mesh');
+  //     if (!meshA || !meshB) return;
+
+  //     meshA.updateMatrixWorld();
+  //     meshB.updateMatrixWorld();
+
+  //     const boxA = new THREE.Box3().setFromObject(meshA).expandByScalar(0.06);
+  //     const boxB = new THREE.Box3().setFromObject(meshB).expandByScalar(0.06);
+
+  //     if (boxA.intersectsBox(boxB)) {
+  //       this.el.setAttribute('material', 'color', 'red'); 
+  //       setCollision(true);
+  //       console.warn(`🚨 Collision：${this.el.id} and ${this.data.target.id}`);
+  //     } else {
+  //       this.el.setAttribute('material', 'color', 'white');
+  //       setCollision(false);
+  //     }
+  //   }
+  // });
+
+  AFRAME.registerComponent('joint-collision-check', {
+    schema: {
+      target: { type: 'selector' },
+      xPad: { type: 'number', default: 0 },
+      yPad: { type: 'number', default: 0 },
+      zPad: { type: 'number', default: 0 }
+    },
+
+    tick: function () {
+      const meshA = this.el.getObject3D('mesh');
+      const meshB = this.data.target?.getObject3D('mesh');
+      if (!meshA || !meshB) return;
+
+      meshA.updateMatrixWorld();
+      meshB.updateMatrixWorld();
+
+      const padding = new THREE.Vector3(this.data.xPad, this.data.yPad, this.data.zPad);
+
+      const boxA = new THREE.Box3().setFromObject(meshA).expandByVector(padding);
+      const boxB = new THREE.Box3().setFromObject(meshB).expandByVector(padding);
+
+      if (boxA.intersectsBox(boxB)) {
+        setCollision(true);
+        console.warn(`🚨 Collision：${this.el.id} and ${this.data.target.id}`);
+      } else {
+        setCollision(false);
+      }
+    }
+  });
+
+  AFRAME.registerComponent('show-collision-box', {
+    schema: {
+      xPad: { type: 'number', default: 0 },
+      yPad: { type: 'number', default: 0 },
+      zPad: { type: 'number', default: 0 },
+      color: { type: 'color', default: '#00ff00' },
+      opacity: { type: 'number', default: 0.5 } 
+    },
+
+    init: function () {
+      this.helper = null;
+
+      this.el.addEventListener('model-loaded', () => {
+        const mesh = this.el.getObject3D('mesh');
+        if (!mesh) return;
+
+        mesh.updateMatrixWorld(true);
+        const padding = new THREE.Vector3(this.data.xPad, this.data.yPad, this.data.zPad);
+        const box = new THREE.Box3().setFromObject(mesh).expandByVector(padding);
+
+        this.helper = new THREE.Box3Helper(box, new THREE.Color(this.data.color));
+        this.helper.material.transparent = true;
+        this.helper.material.opacity = this.data.opacity;
+
+        this.el.sceneEl.object3D.add(this.helper);
+      });
+    },
+
+    tick: function () {
+      if (!this.helper) return;
+      const mesh = this.el.getObject3D('mesh');
+      if (!mesh) return;
+
+      mesh.updateMatrixWorld(true);
+      const padding = new THREE.Vector3(this.data.xPad, this.data.yPad, this.data.zPad);
+      const box = new THREE.Box3().setFromObject(mesh).expandByVector(padding);
+
+      this.helper.box.copy(box);
+    }
+  });
+
+
+  // AFRAME.registerComponent('joint-collision-check', {
+  //   schema: {
+  //     targets: { type: 'selectorAll' } // 可以选多个目标
+  //   },
+  //   tick: function () {
+  //     const meshA = this.el.getObject3D('mesh');
+  //     if (!meshA) return;
+
+  //     meshA.updateMatrixWorld();
+  //     const boxA = new THREE.Box3().setFromObject(meshA);
+
+  //     this.data.targets.forEach(target => {
+  //       const meshB = target.getObject3D('mesh');
+  //       if (!meshB) return;
+  //       meshB.updateMatrixWorld();
+  //       const boxB = new THREE.Box3().setFromObject(meshB);
+
+  //       if (boxA.intersectsBox(boxB)) {
+  //         meshA.traverse(n => n.isMesh && n.material?.color.set('red'));
+  //         console.warn(`碰撞：${this.el.id} ←→ ${target.id}`);
+  //       }
+  //     });
+  //   }
+  // });
+
+
 }
