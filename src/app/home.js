@@ -8,6 +8,9 @@ import registerAframeComponents from './registerAframeComponents';
 import useMqtt from './useMqtt';
 import { mqttclient, idtopic, publishMQTT, subscribeMQTT, codeType } from '../lib/MetaworkMQTT'
 
+// In Windows, run the following command to allow script execution at first:
+// Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+
 /* ============================= Static Global Variables ==========================================*/
 const THREE = window.AFRAME.THREE;
 const mr = require('../modern_robotics/modern_robotics_core.js');
@@ -43,21 +46,23 @@ const loadRobotParams = (robot_model) => {
   const rk = new RobotKinematics(robot_model);
   const M = rk.get_M();
   const Slist = rk.get_Slist();
-  const jointLimits = rk.jointLimits;
   const Blist = mr.SlistToBlist(M, Slist);
+  const jointLimits = rk.jointLimits;
   const jointInitial = rk.get_jointInitial();
-
   return {
-    M,
-    Slist,
-    jointLimits,
-    Blist,
-    jointInitial
+    M, Slist, Blist,
+    jointLimits, jointInitial
   };
 };
 
 
-/** FK **/
+/**
+ * Forward Kinematics
+ * @param {Object} robotParams // Robot parameters including M, Slist, Blist, jointLimits, jointInitial
+ * @param {Array<number>} theta_body // Current joint angles, and also used as initial guess
+ * @param {string} VR_Control_Mode // VR control mode: 'inSpace' or 'inBody'
+ * @returns {Array<number>}   return T // Return end-effector pose
+ */
 function FK(robotParams, theta_body, VR_Control_Mode) {
   const M = robotParams.M;
   const Slist = robotParams.Slist;
@@ -75,7 +80,14 @@ function FK(robotParams, theta_body, VR_Control_Mode) {
   return T;
 }
 
-/** IK **/
+/**
+ * Inverse Kinematics with Joint Velocity Limit
+ * @param {Array<number>} T_sd // Target end-effector pose
+ * @param {Object} robotParams // Robot parameters including M, Slist, Blist, jointLimits, jointInitial
+ * @param {Array<number>} theta_body // Current joint angles, and also used as initial guess
+ * @param {string} VR_Control_Mode // VR control mode: 'inSpace' or 'inBody'
+ * @returns {Array<number>} { new_theta_body, error_code }   // Return new joint angles and error code of IK
+ */
 function IK_joint_velocity_limit(T_sd, robotParams, theta_body, VR_Control_Mode) {
   let thetalist_sol, ik_success;
   const max_joint_velocity = 5.5; // Maximum joint velocity limit
@@ -125,7 +137,6 @@ function IK_joint_velocity_limit(T_sd, robotParams, theta_body, VR_Control_Mode)
  * @param {Array<number>} controller_object.quaternion // controller quaternion in 3D space
  * @returns {Array<number>} vr_controller_R_relative   // Return the relative Rotation Matrix of the VR controller
  */
-
 function vrquatToR(vr_controller_quat, VR_Control_Mode) {
   // Initial offset quaternion to correct the VR controller orientation
   const initialOffsetQuat = new THREE.Quaternion().setFromEuler(
@@ -235,6 +246,7 @@ export default function DynamicHome(props) {
   const [c_deg_y,set_c_deg_y] = React.useState(150)
   const [c_deg_z,set_c_deg_z] = React.useState(0)
 
+  // Message Display
   const [dsp_message,set_dsp_message] = React.useState("")
 
   // Remote Webcam
@@ -480,7 +492,12 @@ export default function DynamicHome(props) {
     vrModeRef.current
   ]);
 
-  // Reset as when trigger is released
+  // Reset when trigger is released
+  /* 
+  *  Note: 
+  *  If the VR position difference and relative rotation matrix are not reset, 
+  *  residual values may accumulate and cause the robot to jump.
+  */
   React.useEffect(() => {
     if (rendered && vrModeRef.current && !trigger_on && lastVRPosRef.current) {
       lastVRPosRef.current = null;
@@ -663,7 +680,12 @@ export default function DynamicHome(props) {
     vrModeRef.current
   ]);
 
-  // Reset as when trigger is released
+  // Reset when trigger is released
+  /* 
+  *  Note: 
+  *  If the VR position difference and relative rotation matrix are not reset, 
+  *  residual values may accumulate and cause the robot to jump.
+  */
   React.useEffect(() => {
     if (rendered && vrModeRef.current && !trigger_on_left && lastVRPosRef_left.current) {
       lastVRPosRef_left.current = null;
@@ -743,7 +765,8 @@ export default function DynamicHome(props) {
     };
   }, [ button_x_on, button_y_on, grip_on_left]);
 
-  
+
+  /*========================= Collision Check ================================*/
   const thetaHistoryRef = React.useRef([]);
   const thetaLeftHistoryRef = React.useRef([]);
 
@@ -768,7 +791,7 @@ export default function DynamicHome(props) {
   }, [collision, theta_body, theta_body_left]);
 
 
-  /* ------------------------- Web Controller Inputs -----------------------*/
+  /* ========================= Web Controller Inputs =========================*/
   const controllerProps = React.useMemo(() => ({
     robotName, robotNameList, set_robotName,
     toolName, toolNameList, set_toolName,
@@ -795,7 +818,7 @@ export default function DynamicHome(props) {
     // KinematicsControl_joint_velocity_limit,
   ]);
 
-  /* ------------------------- VRController Inputs (Aframe Components) -----------------------*/
+  /* =============== VRController Inputs (Aframe Components) =================*/
   React.useEffect(() => {
     registerAframeComponents({
       set_rendered,
@@ -816,6 +839,7 @@ export default function DynamicHome(props) {
       set_button_y_on,
 
       //Collision Check
+      collision,
       setCollision,
 
       // VR Camera Pose
@@ -838,6 +862,16 @@ export default function DynamicHome(props) {
     thetaToolMQTT.current = theta_tool;
   }, [theta_tool]);
 
+  const thetaBodyLeftMQTT = React.useRef(theta_body_left);
+  React.useEffect(() => {
+    thetaBodyLeftMQTT.current = theta_body_left;
+  }, [theta_body_left]);
+
+  const thetaToolLeftMQTT = React.useRef(theta_tool_left);
+  React.useEffect(() => {
+    thetaToolLeftMQTT.current = theta_tool_left;
+  }, [theta_tool_left]);
+
   React.useEffect(() => {
     window.requestAnimationFrame(onAnimationMQTT);
   }, []);
@@ -846,8 +880,10 @@ export default function DynamicHome(props) {
   const onAnimationMQTT = (time) =>{
     const robot_state_json = JSON.stringify({
       time: time,
-      joints: thetaBodyMQTT.current,
-      // grip: gripRef.current      
+      joint: thetaBodyMQTT.current,
+      tool: thetaToolMQTT.current,
+      joints_left: thetaBodyLeftMQTT.current,
+      tool_left: thetaToolLeftMQTT.current,
     });
     publishMQTT(MQTT_ROBOT_STATE_TOPIC + robotIDRef.current , robot_state_json); 
     // console.log("onAnimationMQTT published:", robot_state_json);
@@ -864,8 +900,10 @@ export default function DynamicHome(props) {
     if ((mqttclient != null) && receiveStateRef.current) {
       const ctl_json = JSON.stringify({
         time: time,
-        joints: thetaBodyMQTT.current,
-        tool: thetaToolMQTT.current
+        joint: thetaBodyMQTT.current,
+        tool: thetaToolMQTT.current,
+        joints_left: thetaBodyLeftMQTT.current,
+        tool_left: thetaToolLeftMQTT.current
       });
       publishMQTT(MQTT_CTRL_TOPIC + robotIDRef.current, ctl_json);
     }
@@ -888,17 +926,34 @@ export default function DynamicHome(props) {
     }
   }, [robot_state]);
 
+  const [theta_body_left_feedback, setThetaBodyLeftFeedback] = React.useState([0, 0, 0, 0, 0, 0]);
+  React.useEffect(() => {
+    if (robot_state_left === "initialize") {
+      setThetaBodyLeft(theta_body_left_feedback)
+    }
+  }, [robot_state_left]);
+
   useMqtt({
+    // MQTT Client and Topics
     props,
     requestRobot,
-    thetaBodyMQTT: setThetaBody,
-    thetaToolMQTT: setThetaTool,
-    thetaBodyFeedback: setThetaBodyFeedback,
-    robot_state: setRobotState,
     robotIDRef,
     MQTT_DEVICE_TOPIC, 
     MQTT_CTRL_TOPIC, 
     MQTT_ROBOT_STATE_TOPIC,
+
+    // Right Arm
+    thetaBodyMQTT: setThetaBody,
+    thetaToolMQTT: setThetaTool,
+    thetaBodyFeedback: setThetaBodyFeedback,
+    robot_state: setRobotState,
+
+    // Left Arm
+    thetaBodyLeftMQTT: setThetaBodyLeft,
+    thetaToolLeftMQTT: setThetaToolLeft,
+    thetaBodyLeftFeedback: setThetaBodyLeftFeedback,
+    robot_state_left: setRobotStateLeft,
+    
   });
 
   /* ============================= Robot State Update ==========================================*/

@@ -2,16 +2,26 @@ import { useEffect } from 'react';
 import { connectMQTT, mqttclient, idtopic, subscribeMQTT, publishMQTT, codeType } from '../lib/MetaworkMQTT'
 
 export default function useMqtt({
+  // MQTT Client and Topics
   props,
   requestRobot,
-  thetaBodyMQTT,
-  thetaToolMQTT,
-  thetaBodyFeedback,
-  robot_state,
   robotIDRef,
   MQTT_DEVICE_TOPIC,
   MQTT_CTRL_TOPIC,
   MQTT_ROBOT_STATE_TOPIC,
+
+  // Right Arm
+  thetaBodyMQTT,
+  thetaToolMQTT,
+  thetaBodyFeedback,
+  robot_state,
+
+  // Left Arm
+  thetaBodyLeftMQTT,
+  thetaToolLeftMQTT,
+  thetaBodyLeftFeedback,
+  robot_state_left,
+
 }) {
   useEffect(() => {
   // connect to MQTT broker  
@@ -44,14 +54,16 @@ export default function useMqtt({
       return;
     }
 
-    // Publish Command to Robot
+    // Publish Control Signal to Arm/Arms
     if (props.viewer && topic === MQTT_CTRL_TOPIC + robotIDRef.current) {
-      if (data.joints != undefined) {
+
+      /* Right Arm */
+      if (data.joint != undefined) {
         thetaBodyMQTT(prev => {
-          if (JSON.stringify(prev) !== JSON.stringify(data.joints)) {
-            return data.joints;
+          if (JSON.stringify(prev) !== JSON.stringify(data.joint)) {
+            return data.joint;
           }
-          console.log("Time:", data.time, "From:", topic, "Send Joint Body:", data.joints);
+          console.log("Time:", data.time, "From:", topic, "Send Joint Body:", data.joint);
           return prev;
         });
       }
@@ -64,31 +76,73 @@ export default function useMqtt({
           return prev;
         });
       }
+
+      /* Left Arm */
+      if (data.joints_left != undefined) {
+        thetaBodyLeftMQTT(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(data.joints_left)) {
+            return data.joints_left;
+          }
+          // console.log("Time:", data.time, "From:", topic, "Send Joint Body Left:", data.joints_left);
+          return prev;
+        });
+      }
+      if (data.tool_left != undefined) {
+        thetaToolLeftMQTT(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(data.tool_left)) {
+            return data.tool_left;
+          }
+          // console.log("Time:", data.time, "From:", topic, "Send Joint Tool Left:", data.tool_left);
+          return prev;
+        });
+      }
     }
 
     // Subscribe Robot State from Robot
     if (!props.viewer && topic === MQTT_ROBOT_STATE_TOPIC + robotIDRef.current) {
+      /* Right Arm */
       if (data.state != undefined) {
-        console.log("Robot state:", data.state);
+        console.log("Right Arm State:", data.state);
         robot_state(data.state);
       }
       if (data.model != undefined) {
-        console.log("Robot model:", data.model);
+        console.log("Right Arm Model:", data.model);
       }
       if (data.joint_feedback != undefined) {
         thetaBodyFeedback(prev => {
           if (JSON.stringify(prev) !== JSON.stringify(data.joint_feedback)) {
             return data.joint_feedback;
           }
-          console.log("From:", topic, "Recive Joint Feedback:", data.joint_feedback);
+          // console.log("From:", topic, "Recive Right Arm Joint Feedback:", data.joint_feedback);
           return prev;
         });
       }
       if (data.tool != undefined) {
-        console.log("Robot current tool:", data.tool);
+        // console.log("Right Arm Current Tool Action:", data.tool);
       }
-      // robot_connected(true);
     }
+
+    /* Left Arm */
+    if (data.state_left != undefined) {
+        console.log("Left Arm State:", data.state_left);
+        robot_state_left(data.state_left);
+      }
+    if (data.model_left != undefined) {
+        console.log("Left Arm Model:", data.model_left);
+      }
+    if (data.joint_feedback_left != undefined) {
+      thetaBodyLeftFeedback(prev => {
+        if (JSON.stringify(prev) !== JSON.stringify(data.joint_feedback_left)) {
+          return data.joint_feedback_left;
+        }
+        // console.log("From:", topic, "Recive Left Arm Joint Feedback Left:", data.joint_feedback_left);
+        return prev;
+      });
+    }
+    if (data.tool_left != undefined) {
+      // console.log("Left Arm Current Tool Action:", data.tool_left);
+    }
+
   };
 
   window.mqttClient.on('message', handler);
