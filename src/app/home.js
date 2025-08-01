@@ -882,7 +882,7 @@ export default function DynamicHome(props) {
       time: time,
       joint: thetaBodyMQTT.current,
       tool: thetaToolMQTT.current,
-      joints_left: thetaBodyLeftMQTT.current,
+      joint_left: thetaBodyLeftMQTT.current,
       tool_left: thetaToolLeftMQTT.current,
     });
     publishMQTT(MQTT_ROBOT_STATE_TOPIC + robotIDRef.current , robot_state_json); 
@@ -902,7 +902,7 @@ export default function DynamicHome(props) {
         time: time,
         joint: thetaBodyMQTT.current,
         tool: thetaToolMQTT.current,
-        joints_left: thetaBodyLeftMQTT.current,
+        joint_left: thetaBodyLeftMQTT.current,
         tool_left: thetaToolLeftMQTT.current
       });
       publishMQTT(MQTT_CTRL_TOPIC + robotIDRef.current, ctl_json);
