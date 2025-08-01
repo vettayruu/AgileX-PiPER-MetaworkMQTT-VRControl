@@ -101,9 +101,9 @@ if __name__ == "__main__":
 
     # initialize shared memory
     recv = MQTT_Recv()
-    thetaBody_initial = np.array([0, -0.27473, 1.44144, 0, 1.22586, 0])
-    arr[8:14] = thetaBody_initial # Initial joint angles
-    arr[15] = 0.0  # Initial tool angle
+    # thetaBody_initial = np.array([0, -0.27473, 1.44144, 0, 1.22586, 0])
+    # arr[8:14] = thetaBody_initial # Initial joint angles
+    # arr[15] = 0.0  # Initial tool angle
     print("Shared memory PiPER created and initialized.")
 
     # Control Parameter
@@ -111,7 +111,7 @@ if __name__ == "__main__":
     dt = 0.002
     N = int(Tf/dt)
     method = 5
-    Kp = 0.6
+    Kp = 0.60
     Kd = 0.02
 
     prev_error = np.zeros(6)
@@ -121,14 +121,48 @@ if __name__ == "__main__":
         shm = recv.get_shm_object()
         print("shared memory name：", shm.name)
         time.sleep(0.1)
-        while True:
+
+        # Update joint message
+        arr = recv.get_shared_memory()
+        thetaBody = arr[8:14].astype(float)  # 6Dof robot
+        thetaTool = arr[15].astype(float)
+
+        msg = piper.GetArmJointMsgs()
+        joint_feedback = get_joint_feedback_mr(msg, factor)
+        joint_feedback = np.array(joint_feedback)  # 当前角度（rad）
+        arr[0:6] = joint_feedback
+
+        # Send robot current state to MQTT
+        robot_state_msg = {
+            "state": "initialize",
+            "model": "agilex_piper",
+            "joint_feedback": joint_feedback.tolist(),
+        }
+        recv.publish_message(robot_state_msg)
+        time.sleep(1.0)
+
+        print("shared memory:", arr)
+        a = arr[0:6]
+        b = arr[8:14]
+        equal = np.allclose(a, b)
+
+        if equal:
+            robot_state_msg = {
+                "state": "ready",
+            }
+            recv.publish_message(robot_state_msg)
+            print("Robot Ready.")
+        else:
+            print("Robot Not Ready. Please check VR control communication.")
+
+        while equal:
+
+
             # Update joint message
-            arr = recv.get_shared_memory()
             thetaBody = arr[8:14].astype(float)  # 6Dof robot
             thetaTool = arr[15].astype(float)
 
             # Get joint feedback
-            msg = piper.GetArmJointMsgs()
             joint_feedback = get_joint_feedback_mr(msg, factor)
             joint_feedback = np.array(joint_feedback)  # 当前角度（rad）
             arr[0:6] = joint_feedback
@@ -169,12 +203,19 @@ if __name__ == "__main__":
             finger_pos = (((thetaTool) * 0.6) / 1000) + 0.0004 # /mm
             joint_tool = round(finger_pos * 1000 * 1000)
             piper.GripperCtrl(abs(joint_tool), 1000, 0x01, 0)
-
             # time.sleep(Tf)
 
     except KeyboardInterrupt:
         print("MQTT Recv Stopped")
+        robot_state_msg = {
+            "state": "stop",
+        }
+        recv.publish_message(robot_state_msg)
         sys.exit(0)
     except Exception as e:
         print("MQTT Recv Error:", e)
+        robot_state_msg = {
+            "state": "error",
+        }
+        recv.publish_message(robot_state_msg)
         sys.exit(1)

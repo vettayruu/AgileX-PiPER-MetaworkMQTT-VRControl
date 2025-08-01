@@ -2,19 +2,10 @@ import json
 from paho.mqtt import client as mqtt
 import multiprocessing as mp
 import multiprocessing.shared_memory as sm
-import socket
 
-from multiprocessing import Process, Queue
-
-import sys
 import os
 from datetime import datetime
-import math
 import numpy as np
-import time
-
-## ここでUUID を使いたい
-import uuid
 
 from dotenv import load_dotenv
 import ipget
@@ -22,8 +13,10 @@ import ipget
 load_dotenv(os.path.join(os.path.dirname(__file__),'.env'))
 
 MQTT_SERVER = os.getenv("MQTT_SERVER", "sora2.uclab.jp")
-USER_UUID = "84f289d0-bf07-4ad2-baf1-a4c8f7c9a763-qk4b9zg-viewer"
+USER_UUID = "161c8584-a397-4c11-a5fb-767e3094bba5-ji2ipnh-viewer"
+# USER_UUID_2 = "161c8584-a397-4c11-a5fb-767e3094bba5-nr9yhzl"
 MQTT_CTRL_TOPIC ="control/" + USER_UUID # MANAGE_RECV_TOPIC で動的に変更される
+MQTT_ROBOT_STATE_TOPIC = "robot/" + USER_UUID
 
 ROBOT_UUID = os.getenv("ROBOT_UUID","no-uuid")
 ROBOT_MODEL = os.getenv("ROBOT_MODEL","piper")
@@ -122,3 +115,7 @@ class MQTT_Recv:
     
     def get_shm_object(self):
         return self.sm
+
+    def publish_message(self, payload_dict):
+        self.client.publish(MQTT_ROBOT_STATE_TOPIC, json.dumps(payload_dict))
+
