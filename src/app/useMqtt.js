@@ -63,7 +63,7 @@ export default function useMqtt({
           if (JSON.stringify(prev) !== JSON.stringify(data.joint)) {
             return data.joint;
           }
-          console.log("Time:", data.time, "From:", topic, "Send Joint Body:", data.joint);
+          // console.log("Time:", data.time, "From:", topic, "Send Joint Body Right:", data.joint);
           return prev;
         });
       }
@@ -78,12 +78,12 @@ export default function useMqtt({
       }
 
       /* Left Arm */
-      if (data.joints_left != undefined) {
+      if (data.joint_left != undefined) {
         thetaBodyLeftMQTT(prev => {
-          if (JSON.stringify(prev) !== JSON.stringify(data.joints_left)) {
-            return data.joints_left;
+          if (JSON.stringify(prev) !== JSON.stringify(data.joint_left)) {
+            return data.joint_left;
           }
-          // console.log("Time:", data.time, "From:", topic, "Send Joint Body Left:", data.joints_left);
+          // console.log("Time:", data.time, "From:", topic, "Send Joint Body Left:", data.joint_left);
           return prev;
         });
       }
