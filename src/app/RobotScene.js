@@ -77,7 +77,7 @@ export default function RobotScene(props) {
   // Webcam Stream
   React.useEffect(() => {
     if (props.webcamStream1) {
-      const videoEl = document.getElementById('remotevideo-webcam1');
+      const videoEl = document.getElementById('leftVideo');
       if (videoEl && videoEl.srcObject !== props.webcamStream1) {
         videoEl.srcObject = props.webcamStream1;
         videoEl.play();
@@ -87,7 +87,7 @@ export default function RobotScene(props) {
 
   React.useEffect(() => {
     if (props.webcamStream2) {
-      const videoEl = document.getElementById('remotevideo-webcam2');
+      const videoEl = document.getElementById('rightVideo');
       if (videoEl && videoEl.srcObject !== props.webcamStream2) {
         videoEl.srcObject = props.webcamStream2;
         videoEl.play();
@@ -116,30 +116,57 @@ export default function RobotScene(props) {
 
         {/* Remote Cam*/}
         <a-assets>
-          <video id="remotevideo-webcam1" autoPlay playsInline crossOrigin="anonymous" muted></video>
+          <video id="leftVideo" autoPlay playsInline crossOrigin="anonymous" muted></video>
+          <video id="rightVideo" autoPlay playsInline crossOrigin="anonymous" muted></video>
         </a-assets>
 
-        <a-video
-          src="#remotevideo-webcam1"
-          width="1.6"
-          height="0.9"
-          position="0 0.5 -1.0"
-          visible="false"
-        ></a-video>
+        {/* For 720P */}
+        {/* <a-curvedimage
+          id="left-curved"
+          height="7.0"
+          radius="5.7"
+          theta-length="120"
+          position="0.2 1.6 -1.0"
+          rotation="0 -115 0"
+          scale="-1 1 1"
+          stereo-curvedvideo="eye: left; videoId: leftVideo">
+        </a-curvedimage>
 
-        <a-assets>
-          <video id="remotevideo-webcam2" autoPlay playsInline crossOrigin="anonymous" muted></video>
-        </a-assets>
+        <a-curvedimage
+          id="right-curved"
+          height="7.0"
+          radius="5.7"
+          theta-length="120"
+          position="0.2 1.6 -1.0"
+          rotation="0 -120.3 0"
+          scale="-1 1 1"
+          stereo-curvedvideo="eye: right; videoId: rightVideo">
+        </a-curvedimage> */}
 
-        <a-video
-          src="#remotevideo-webcam2"
-          width="1.6"
-          height="0.9"
-          position="-1.0 0.5 -1.0"
-          rotation="0 45 0"
-          visible="false"
-        ></a-video>
+        {/* For 1080P */}
+        <a-curvedimage
+          id="left-curved"
+          height="9.0"
+          radius="5.7"
+          theta-length="155"
+          position="-0.5 1.2 -1.50"
+          rotation="0 -115 0"
+          scale="-1 1 1"
+          stereo-curvedvideo="eye: left; videoId: leftVideo"
+        ></a-curvedimage>
 
+        <a-curvedimage
+          id="right-curved"
+          height="9.0"
+          radius="5.7"
+          theta-length="155"
+          position="-0.2. 1.2 -1.50"
+          rotation="0 -121 0"
+          scale="-1 1 1"
+          stereo-curvedvideo="eye: right; videoId: rightVideo"
+        ></a-curvedimage>
+        
+        
         {/* Light */}
         <a-entity light="type: directional; color: #FFF; intensity: 0.25" position="1 1 1"></a-entity>
         <a-entity light="type: directional; color: #FFF; intensity: 0.25" position="-1 1 1"></a-entity>
@@ -150,18 +177,39 @@ export default function RobotScene(props) {
 
           {/* Camera */}
           <a-camera id="camera" cursor="rayOrigin: mouse;" position="0 0 0">
-            <a-entity jtext={`text: ${dsp_message}; color: black; background:rgb(31, 219, 131); border: #000000`} position="0 0.7 -1.4"></a-entity>
+            {/* <a-entity jtext={`text: ${dsp_message}; color: black; background:rgb(31, 219, 255); border: #000000`} position="0 0.7 -1.4"></a-entity>
+            <a-curvedimage
+              id="left-curved"
+              height="9.0"
+              radius="5.7"
+              theta-length="155"
+              position="-0.2 0 0"
+              rotation="0 -115 0"
+              scale="-1 1 1"
+              stereo-curvedvideo="eye: left; videoId: leftVideo"
+            ></a-curvedimage>
+
+            <a-curvedimage
+              id="right-curved"
+              height="9.0"
+              radius="5.7"
+              theta-length="155"
+              position="-0.2 0 0"
+              rotation="0 -121 0"
+              scale="-1 1 1"
+              stereo-curvedvideo="eye: right; videoId: rightVideo"
+            ></a-curvedimage> */}
           </a-camera>
 
           {/* End Effector Right*/}
           </a-entity>
           <a-sphere 
-            position={`${position_ee[0]+0.3} ${position_ee[1]} ${position_ee[2]}`} 
+            position={`${position_ee[0]+0.5} ${position_ee[1]} ${position_ee[2]}`} 
             scale="0.012 0.012 0.012" 
             color={stateCodeColor}
             visible={true}></a-sphere>
           <a-entity
-            position={`${position_ee[0]+0.3} ${position_ee[1]} ${position_ee[2]}`}
+            position={`${position_ee[0]+0.5} ${position_ee[1]} ${position_ee[2]}`}
             // ZYX
             rotation={`${euler_ee_deg[0]} ${-euler_ee_deg[2]} ${-euler_ee_deg[1]} `}
           >
@@ -172,12 +220,12 @@ export default function RobotScene(props) {
 
           {/* End Effector Left */}
           <a-sphere 
-            position={`${position_ee_left[0]-0.3} ${position_ee_left[1]} ${position_ee_left[2]}`} 
+            position={`${position_ee_left[0]-0.5} ${position_ee_left[1]} ${position_ee_left[2]}`} 
             scale="0.012 0.012 0.012" 
             color={stateCodeColorLeft}
             visible={true}></a-sphere>
           <a-entity
-            position={`${position_ee_left[0]-0.3} ${position_ee_left[1]} ${position_ee_left[2]}`}
+            position={`${position_ee_left[0]-0.5} ${position_ee_left[1]} ${position_ee_left[2]}`}
             // ZYX
             rotation={`${euler_ee_deg_left[0]} ${-euler_ee_deg_left[2]} ${-euler_ee_deg_left[1]} `}
           >
@@ -229,8 +277,13 @@ export default function RobotScene(props) {
               opacity="0.3"
             />
           </a-entity>
+
+          {/*Point Cloud*/}
+          {/* <a-entity ply-pointcloud="https://192.168.197.52:5001/pointcloud" position="0 0 0" rotation="180 0 0"></a-entity> */}
+          {/* <a-entity ply-pointcloud="http://localhost:3000/zed_mini_pointcloud.ply" position="0 0 0"></a-entity> */}
          
       </a-scene>
+
       <Controller {...controllerProps}/>
       <div className="footer">
         <div>{`add information here`}</div>

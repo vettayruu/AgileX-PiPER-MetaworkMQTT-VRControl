@@ -885,7 +885,7 @@ export default function DynamicHome(props) {
       joint_left: thetaBodyLeftMQTT.current,
       tool_left: thetaToolLeftMQTT.current,
     });
-    publishMQTT(MQTT_ROBOT_STATE_TOPIC + robotIDRef.current , robot_state_json); 
+    // publishMQTT(MQTT_ROBOT_STATE_TOPIC + robotIDRef.current , robot_state_json); 
     // console.log("onAnimationMQTT published:", robot_state_json);
     window.requestAnimationFrame(onAnimationMQTT); 
   }

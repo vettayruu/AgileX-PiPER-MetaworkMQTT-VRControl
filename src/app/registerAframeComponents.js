@@ -1,3 +1,7 @@
+
+
+import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader';
+
 let registered = false;
 
 export default function registerAframeComponents(options) {
@@ -35,8 +39,9 @@ export default function registerAframeComponents(options) {
   } = options;
   
   // set rendered state after a short delay to ensure the scene is ready
-  setTimeout(() => set_rendered(true), 16.67); // ~60 FPS
+  setTimeout(() => set_rendered(true), 16.67); // ~ 60 FPS
 
+  /* ========================== Robot Model Component ========================= */
   AFRAME.registerComponent('robot-click', {
     init: function () {
       this.el.addEventListener('click', () => {
@@ -46,6 +51,31 @@ export default function registerAframeComponents(options) {
     }
   });
 
+  AFRAME.registerComponent('model-opacity', {
+    schema: {
+      opacity: { type: 'number', default: 0.5 },
+    },
+    init: function () {
+      this.el.addEventListener('model-loaded', this.update.bind(this));
+    },
+    update: function () {
+      var mesh = this.el.getObject3D('mesh');
+      var data = this.data;
+      if (!mesh) {
+        return;
+      }
+      mesh.traverse(function (node) {
+        if (node.isMesh) {
+          node.material.opacity = data.opacity;
+          node.material.transparent = data.opacity < 1.0;
+          node.material.needsUpdate = true;
+        }
+      });
+    },
+  });
+
+
+  /* ========================== VR Controller Component ========================= */
   AFRAME.registerComponent('vr-controller-right', {
     schema: { type: 'string', default: '' },
     init: function () {
@@ -162,55 +192,8 @@ export default function registerAframeComponents(options) {
     }
   });
 
-  AFRAME.registerComponent('model-opacity', {
-    schema: {
-      opacity: { type: 'number', default: 0.5 },
-    },
-    init: function () {
-      this.el.addEventListener('model-loaded', this.update.bind(this));
-    },
-    update: function () {
-      var mesh = this.el.getObject3D('mesh');
-      var data = this.data;
-      if (!mesh) {
-        return;
-      }
-      mesh.traverse(function (node) {
-        if (node.isMesh) {
-          node.material.opacity = data.opacity;
-          node.material.transparent = data.opacity < 1.0;
-          node.material.needsUpdate = true;
-        }
-      });
-    },
-  });
 
-  // AFRAME.registerComponent('joint-collision-check', {
-  //   schema: {
-  //     target: { type: 'selector' } 
-  //   },
-  //   tick: function () {
-  //     const meshA = this.el.getObject3D('mesh');
-  //     const meshB = this.data.target?.getObject3D('mesh');
-  //     if (!meshA || !meshB) return;
-
-  //     meshA.updateMatrixWorld();
-  //     meshB.updateMatrixWorld();
-
-  //     const boxA = new THREE.Box3().setFromObject(meshA).expandByScalar(0.06);
-  //     const boxB = new THREE.Box3().setFromObject(meshB).expandByScalar(0.06);
-
-  //     if (boxA.intersectsBox(boxB)) {
-  //       this.el.setAttribute('material', 'color', 'red'); 
-  //       setCollision(true);
-  //       console.warn(`🚨 Collision：${this.el.id} and ${this.data.target.id}`);
-  //     } else {
-  //       this.el.setAttribute('material', 'color', 'white');
-  //       setCollision(false);
-  //     }
-  //   }
-  // });
-
+  /* ========================== Collision Check Component ========================= */
   AFRAME.registerComponent('joint-collision-check', {
     schema: {
       target: { type: 'selector' },
@@ -282,10 +265,35 @@ export default function registerAframeComponents(options) {
     }
   });
 
+  AFRAME.registerComponent('follow-camera', {
+    schema: {
+      offset: { type: 'vec3', default: { x: 0, y: 0, z: -1 } } // Offset relative to the camera
+    },
+    tick: function () {
+      const cameraEl = this.el.sceneEl.camera.el; // Get the camera entity
+      if (!cameraEl) return;
 
-  // AFRAME.registerComponent('joint-collision-check', {
+      // Get the camera's world position and rotation
+      const cameraWorldPosition = new THREE.Vector3();
+      const cameraWorldRotation = new THREE.Euler();
+      cameraEl.object3D.getWorldPosition(cameraWorldPosition);
+      cameraEl.object3D.getWorldRotation(cameraWorldRotation);
+
+      // Apply the offset relative to the camera's position
+      const offset = new THREE.Vector3(this.data.offset.x, this.data.offset.y, this.data.offset.z);
+      offset.applyEuler(cameraWorldRotation); // Rotate the offset based on the camera's rotation
+      const newPosition = cameraWorldPosition.add(offset);
+
+      // Update the position and rotation of the entity
+      this.el.object3D.position.copy(newPosition);
+      this.el.object3D.rotation.copy(cameraWorldRotation);
+    }
+  });
+
+
+  // AFRAME.registerComponent('multi-collision-check', {
   //   schema: {
-  //     targets: { type: 'selectorAll' } // 可以选多个目标
+  //     targets: { type: 'selectorAll' } // 
   //   },
   //   tick: function () {
   //     const meshA = this.el.getObject3D('mesh');
@@ -302,11 +310,117 @@ export default function registerAframeComponents(options) {
 
   //       if (boxA.intersectsBox(boxB)) {
   //         meshA.traverse(n => n.isMesh && n.material?.color.set('red'));
-  //         console.warn(`碰撞：${this.el.id} ←→ ${target.id}`);
+  //         console.warn(`Collision：${this.el.id} ←→ ${target.id}`);
   //       }
   //     });
   //   }
   // });
 
+  /* ========================== Stereo Image Component ========================= */
+  AFRAME.registerComponent('stereo-plane', {
+    schema: {
+      eye: { type: 'string', default: 'left' }, // 'left', 'right', or 'both'
+      videoId: { type: 'string', default: '' }  // ID of the <video> element
+    },
+    init() {
+      const videoEl = document.getElementById(this.data.videoId);
+      if (!videoEl || videoEl.tagName !== 'VIDEO') {
+        console.warn('Video element not found or invalid:', this.data.videoId);
+        return;
+      }
 
+      this.videoEl = videoEl;
+      this.videoEl.setAttribute('crossorigin', 'anonymous');
+      this.videoEl.setAttribute('playsinline', 'true');
+      this.videoEl.play();
+
+      this.el.setAttribute('material', {
+        shader: 'flat',
+        src: this.videoEl
+      });
+
+      this.el.setAttribute('geometry', {
+        primitive: 'plane',
+        width: 2.5,
+        height: 2
+      });
+
+      this.el.setAttribute('position', '0 1.0 0.5');
+    },
+    update() {
+      const mesh = this.el.getObject3D('mesh');
+      if (!mesh) return;
+
+      switch (this.data.eye) {
+        case 'left':
+          mesh.layers.set(1);
+          break;
+        case 'right':
+          mesh.layers.set(2);
+          break;
+        default:
+          mesh.layers.set(0); // both
+      }
+    }
+  });
+
+  AFRAME.registerComponent('stereo-curvedvideo', {
+    schema: {
+      eye: { type: 'string', default: 'left' }, // left / right / both
+      videoId: { type: 'string' }
+    },
+    init: function () {
+      const videoEl = document.getElementById(this.data.videoId);
+      if (!videoEl || videoEl.tagName !== 'VIDEO') {
+        console.warn('Video element not found:', this.data.videoId);
+        return;
+      }
+
+      this.videoEl = videoEl;
+      this.videoEl.setAttribute('crossorigin', 'anonymous');
+      this.videoEl.setAttribute('playsinline', 'true');
+      this.videoEl.play();
+
+      this.el.addEventListener('model-loaded', () => {
+        const mesh = this.el.getObject3D('mesh');
+        if (!mesh) return;
+
+        mesh.traverse((node) => {
+          if (node.isMesh) {
+            node.material = new THREE.MeshBasicMaterial({
+              map: new THREE.VideoTexture(this.videoEl),
+              side: THREE.DoubleSide
+            });
+          }
+        });
+      });
+
+      const mesh = this.el.getObject3D('mesh');
+      if (mesh) {
+        mesh.traverse((node) => {
+          if (node.isMesh) {
+            node.material = new THREE.MeshBasicMaterial({
+              map: new THREE.VideoTexture(this.videoEl),
+              side: THREE.DoubleSide
+            });
+          }
+        });
+      }
+    },
+    update: function () {
+      const mesh = this.el.getObject3D('mesh');
+      if (!mesh) return;
+
+      switch (this.data.eye) {
+        case 'left':
+          mesh.layers.set(1);
+          break;
+        case 'right':
+          mesh.layers.set(2);
+          break;
+        default:
+          mesh.layers.set(0);
+      }
+    }
+  });
 }
