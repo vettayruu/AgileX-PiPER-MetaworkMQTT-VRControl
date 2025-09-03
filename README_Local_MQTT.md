@@ -67,7 +67,7 @@ https://192.168.197.29:8333
 
 ## 4. Start the MQTT Broker
 
-After verifing, you can use your local MQTT server for communication in your local network.
+After verifying, you can use your local MQTT server for communication in your local network.
 
 **Run Mosquitto as Administrator:**
 
