@@ -1,42 +1,73 @@
-The robot can also controlled by local MQTT
+# Local MQTT Control
 
-Firstly, build local MQTT server by mosquitto
+The robot can also be controlled via a local MQTT broker.
 
+## 1. Install Mosquitto
+Download Mosquitto from the official website:
+
+```
 https://mosquitto.org/download/
+```
 
-In windows, mosquitto is installed in "C:\Program Files\mosquitto"
+On Windows, Mosquitto is usually installed in:
+```
+C:\Program Files\mosquitto
+```
 
-Find mosquitto.conf in the folder, and add 
+## 2. Configure Mosquitto
 
+Open `mosquitto.conf` in the installation folder and add the following settings:
+
+**WebSocket (non-secure, ws):**
+```
 listener 9001
 protocol websockets
+```
+This enables WebSocket connections on port 9001.
 
-This can connect to port 9001 with ws.
+**Secure WebSocket (wss):**
 
-To connect with wss, 
+First, generate `.pem` certificates.
 
-Firstly, create .pem certifications.
+Then add the following lines to `mosquitto.conf`:
 
-Then, add
-
+```
 listener 8333
 protocol websockets
 certfile C:\Program Files\mosquitto\cert.pem
 keyfile C:\Program Files\mosquitto\key.pem
 allow_anonymous true
+```
 
-Port numbers are custormized.
+Port numbers (e.g., 9001, 8333) can be customized.
 
-To start MQTT, run by administritor
+## 3. Start the MQTT Broker
 
+**Run Mosquitto as Administrator:**
+
+```
 cd "C:\Program Files\mosquitto"
 mosquitto -v
+```
 
-Find your server address. 
-In windows, run to show your PC addredd in the current network.
+**Find your server address:**
+On Windows, run `ipconfig` in the terminal, find something like
 
-The certificate your MQTT port.
+```
+IPv4 Address. . . . . . . . . . . : 192.168.197.29
+```
 
-For example, the MQTT port address is 192.168.197.29:8333
-Use broswer go the 192.168.197.29:8333 to certificate your MQTT port.
+Use this IP together with your MQTT port. For example:
+
+```
+192.168.197.29:9001   (for ws)
+192.168.197.29:8333   (for wss)
+```
+
+⚠️ **Important!!!**
+Verify the MQTT Port before MQTT communication. To verify, open your browser and go to your MQTT port. For example:
+
+```
+https://192.168.197.29:8333
+```
 
