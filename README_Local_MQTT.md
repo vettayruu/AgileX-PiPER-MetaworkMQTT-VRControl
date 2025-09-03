@@ -41,14 +41,7 @@ allow_anonymous true
 
 Port numbers (e.g., 9001, 8333) can be customized.
 
-## 3. Start the MQTT Broker
-
-**Run Mosquitto as Administrator:**
-
-```
-cd "C:\Program Files\mosquitto"
-mosquitto -v
-```
+## 3. Verify the MQTT Broker
 
 **Find your server address:**
 On Windows, run `ipconfig` in the terminal, find something like
@@ -65,9 +58,20 @@ Use this IP together with your MQTT port. For example:
 ```
 
 ⚠️ **Important!!!**
-Verify the MQTT Port before MQTT communication. To verify, open your browser and go to your MQTT port. For example:
+Verify the MQTT Port before MQTT communication. 
+To verify, open your browser and go to your MQTT port. For example:
 
 ```
 https://192.168.197.29:8333
 ```
 
+## 4. Start the MQTT Broker
+
+After verifing, you can use your local MQTT server for communication in your local network.
+
+**Run Mosquitto as Administrator:**
+
+```
+cd "C:\Program Files\mosquitto"
+mosquitto -v
+```
