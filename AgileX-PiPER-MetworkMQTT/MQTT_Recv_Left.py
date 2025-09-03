@@ -12,8 +12,13 @@ import ipget
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
-MQTT_SERVER = os.getenv("MQTT_SERVER", "sora2.uclab.jp")
-USER_UUID = "d687dff5-68dc-4176-a2fa-bfcb2e608440-b8ry0r8-viewer"
+# MQTT_SERVER = os.getenv("MQTT_SERVER", "sora2.uclab.jp")
+# USER_UUID = "be83bf27-4c4a-4d51-975a-d7bd3ad830df-f4n14d9-viewer"
+
+# For Local MQTT
+MQTT_SERVER = "192.168.197.29"
+USER_UUID = "d14ad41a-e958-4875-8528-ee3b5ffb73d2-at15uir"
+
 MQTT_CTRL_TOPIC = "control/" + USER_UUID  # MANAGE_RECV_TOPIC で動的に変更される
 MQTT_ROBOT_STATE_TOPIC = "robot/" + USER_UUID
 
@@ -96,17 +101,29 @@ class MQTT_Recv:
         else:
             print("not subscribe msg", msg.topic)
 
+    # For Network
+    # def start_mqtt(self):
+    #     self.client = mqtt.Client()
+    #     self.client.on_connect = self.on_connect  # 接続時のコールバック関数を登録
+    #     self.client.on_disconnect = self.on_disconnect  # 切断時のコールバックを登録
+    #     self.client.on_message = self.on_message  # メッセージ到着時のコールバック
+    #     self.client.connect(MQTT_SERVER, 1883, 60)
+    #     # self.client.loop_forever()   # 通信処理開始
+    #     self.client.loop_start()
+
+    # For Local
     def start_mqtt(self):
-        self.client = mqtt.Client()
+        self.client = mqtt.Client(transport="websockets")
+        self.client.tls_set(cert_reqs=0)
         self.client.on_connect = self.on_connect  # 接続時のコールバック関数を登録
         self.client.on_disconnect = self.on_disconnect  # 切断時のコールバックを登録
         self.client.on_message = self.on_message  # メッセージ到着時のコールバック
-        self.client.connect(MQTT_SERVER, 1883, 60)
+        self.client.connect(MQTT_SERVER, 8333, 60)
         # self.client.loop_forever()   # 通信処理開始
         self.client.loop_start()
 
     def run_proc(self):
-        self.sm = mp.shared_memory.SharedMemory("PiPER")
+        self.sm = mp.shared_memory.SharedMemory("PiPER-LEFT")
         self.pose = np.ndarray((16,), dtype=np.dtype("float32"), buffer=self.sm.buf)
         self.start_mqtt()
 
