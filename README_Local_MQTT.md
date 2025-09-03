@@ -59,8 +59,9 @@ Use this IP together with your MQTT port. For example:
 
 ⚠️ **Important!!!**
 Verify the MQTT Port before MQTT communication. 
-To verify, open your browser and go to your MQTT port. For example:
+To verify, open your browser and go to your MQTT port. 
 
+For example:
 ```
 https://192.168.197.29:8333
 ```
@@ -75,3 +76,6 @@ After verifying, you can use your local MQTT server for communication in your lo
 cd "C:\Program Files\mosquitto"
 mosquitto -v
 ```
+
+## 5. Test Your MQTT Broker
+
