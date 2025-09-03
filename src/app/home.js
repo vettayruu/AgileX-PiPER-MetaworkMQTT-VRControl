@@ -19,11 +19,17 @@ const RobotKinematics = require('../modern_robotics/modern_robotics_Kinematics.j
 const RobotDynamcis = require('../modern_robotics/modern_robotics_Dynamics.js');
 
 // Load Robot Model
-const robot_model = "agilex_piper"; // Change this to your robot model: jaka_zu_5, agilex_piper
+// const robot_model = ["agilex_piper", "agilex_piper", "myCobot280"]; // Change this to your robot model: jaka_zu_5, agilex_piper
+const robot_list = [
+  { robotId: "left_arm", robot_model: "agilex_piper" },
+  { robotId: "right_arm", robot_model: "agilex_piper" },
+  { robotId: "cam", robot_model: "myCobot280" }
+];
+
 const toolLimit = { min: -1, max: 89 }; 
 
 const Euler_order = 'ZYX'; // Euler angle order
-const VR_Control_Mode = 'inBody'; // VR control mode: 'inSpace' or 'inBody'
+// const VR_Control_Mode = 'inBody'; // VR control mode: 'inSpace' or 'inBody'
 
 const dt = 16.67/1000; // VR input period in seconds (60Hz)
 
@@ -53,6 +59,13 @@ const loadRobotParams = (robot_model) => {
     M, Slist, Blist,
     jointLimits, jointInitial
   };
+};
+
+const deg2rad = deg => {
+  if (Array.isArray(deg)) {
+    return deg.map(d => d * Math.PI / 180); // 对数组中的每个元素进行转换
+  }
+  return deg * Math.PI / 180; // 如果是单个数字，直接转换
 };
 
 
@@ -137,7 +150,10 @@ function IK_joint_velocity_limit(T_sd, robotParams, theta_body, VR_Control_Mode)
  * @param {Array<number>} controller_object.quaternion // controller quaternion in 3D space
  * @returns {Array<number>} vr_controller_R_relative   // Return the relative Rotation Matrix of the VR controller
  */
-function vrquatToR(vr_controller_quat, VR_Control_Mode) {
+function vrquatToR(vr_controller_quat, VR_Control_Mode, hand, mode) {
+  const offset_left = [0, Math.PI/2, -Math.PI/2]; // Predefined offset angles for different modes
+  const offset_right = [0, Math.PI/2, -Math.PI]; // Predefined offset angles for different modes
+
   // Initial offset quaternion to correct the VR controller orientation
   const initialOffsetQuat = new THREE.Quaternion().setFromEuler(
     new THREE.Euler((0.6654549523360951 * -1), 0, 0, Euler_order)
@@ -152,16 +168,34 @@ function vrquatToR(vr_controller_quat, VR_Control_Mode) {
 
   // Offset quaternion to correct the end effector orientation
   const bodyOffsetQuat = new THREE.Quaternion().setFromEuler(
-    new THREE.Euler( Math.PI, 0, Math.PI, Euler_order)
+    // new THREE.Euler( Math.PI, 0, Math.PI, Euler_order)
+    new THREE.Euler( -Math.PI/2, 0, 0, Euler_order)
   );
   const bodyQuat = new THREE.Quaternion().multiplyQuaternions(spaceQuat, bodyOffsetQuat);
 
   // Transform the corrected quaternion to a rotation matrix
   const matrix = new THREE.Matrix4();
   if (VR_Control_Mode === 'inSpace') {
+    const worldOffsetQuat2 = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(0, Math.PI/2, 0, Euler_order)
+    );
+    const spaceQuat2 = new THREE.Quaternion().multiplyQuaternions(spaceQuat, worldOffsetQuat2);
     matrix.makeRotationFromQuaternion(spaceQuat);
   } else if (VR_Control_Mode === 'inBody') {
-    matrix.makeRotationFromQuaternion(bodyQuat);
+    if (hand === 'right') {
+      const bodyOffsetQuat_right = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler( 0, 0, -Math.PI + offset_right[mode], Euler_order)
+      );
+      const bodyQuat_right = new THREE.Quaternion().multiplyQuaternions(bodyQuat, bodyOffsetQuat_right);
+      matrix.makeRotationFromQuaternion(bodyQuat_right);
+    }
+    else if (hand === 'left') {
+      const bodyOffsetQuat_left = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler( Math.PI, 0, -Math.PI/2 + offset_left[mode], Euler_order)
+      );
+      const bodyQuat_left = new THREE.Quaternion().multiplyQuaternions(bodyQuat, bodyOffsetQuat_left);
+      matrix.makeRotationFromQuaternion(bodyQuat_left);
+    }
   }
 
   // The columns of the rotation matrix represent the axes of the controller
@@ -184,31 +218,37 @@ export default function DynamicHome(props) {
 
   const [robot_model_left, setRobotModelLeft] = React.useState("agilex_piper");
   const [robot_model_right, setRobotModelRight] = React.useState("agilex_piper");
+  const [robot_model_cam, setRobotModelCam] = React.useState("myCobot280");
 
   const [robotParams, setRobotParams] = React.useState({
     left: null,  // left control robot parameters
     right: null, // right control robot parameters
+    cam: null,   // camera robot parameters
   });
 
   React.useEffect(() => {
     const leftParams = loadRobotParams(robot_model_left);
     const rightParams = loadRobotParams(robot_model_right);
+    const camParams = loadRobotParams(robot_model_cam);
     setRobotParams((prev) => ({
       ...prev,
       left: leftParams,
       right: rightParams,
+      cam: camParams,
     }));
-  }, [robot_model_left, robot_model_right]);
+  }, [robot_model_left, robot_model_right, robot_model_cam]);
 
   React.useEffect(() => {
-    if (robotParams.left !== null && robotParams.right !== null) {
+    if (robotParams.left !== null && robotParams.right !== null && robotParams.cam !== null) {
       console.log("Load Robot Params Left:", robotParams.left);
       console.log("Load Robot Params Right:", robotParams.right);
+      console.log("Load Robot Params Cam:", robotParams.cam);
     }
-  }, [robotParams.left, robotParams.right]);
+  }, [robotParams.left, robotParams.right, robotParams.cam]);
 
   const [error_code, setErrorCode] = React.useState(STATE_CODES.NORMAL);
   const [error_code_left, setErrorCodeLeft] = React.useState(STATE_CODES.NORMAL);
+  const [error_code_cam, setErrorCodeCam] = React.useState(STATE_CODES.NORMAL);
 
   // VR controller state
   const vrModeRef = React.useRef(false);
@@ -218,22 +258,28 @@ export default function DynamicHome(props) {
   const [grip_on, set_grip_on] = React.useState(false)
   const [button_a_on, set_button_a_on] = React.useState(false)
   const [button_b_on, set_button_b_on] = React.useState(false)
+  const [thumbstick_right, setThumbstickRight] = React.useState([0, 0]);
+  const [thumbstick_down_right, setThumbstickDownRight] = React.useState(false);
   const [controller_object, set_controller_object] = React.useState(() => {
     const controller_object = new THREE.Object3D();
     console.log("Right Controller Object Created:", controller_object);
     return controller_object;
     });
 
+
   // Left Controller
   const [trigger_on_left,set_trigger_on_left] = React.useState(false)
   const [grip_on_left, set_grip_on_left] = React.useState(false)
   const [button_x_on, set_button_x_on] = React.useState(false)
   const [button_y_on, set_button_y_on] = React.useState(false)
+  const [thumbstick_left, setThumbstickLeft] = React.useState([0, 0]);
+  const [thumbstick_down_left, setThumbstickDownLeft] = React.useState(false);
   const [controller_object_left, set_controller_object_left] = React.useState(() => {
     const controller_object_left = new THREE.Object3D();
     console.log("Left Controller Object Created:", controller_object_left);
     return controller_object_left;
   });
+  const [showMenu, setShowMenu] = React.useState(false);
 
   const [selectedMode, setSelectedMode] = React.useState('control'); 
   const robotIDRef = React.useRef(idtopic); 
@@ -247,7 +293,7 @@ export default function DynamicHome(props) {
   const [c_deg_z,set_c_deg_z] = React.useState(0)
 
   // Message Display
-  const [dsp_message,set_dsp_message] = React.useState("")
+  const [dsp_message, set_dsp_message] = React.useState("")
 
   // Remote Webcam
   const [webcamStream1, setWebcamStream1] = React.useState(null);
@@ -317,8 +363,19 @@ export default function DynamicHome(props) {
   const [theta_body_left, setThetaBodyLeft] = React.useState([0, 0, 0, 0, 0, 0]);
   const [theta_tool_left, setThetaToolLeft] = React.useState(0);
 
+  // CAM Arm
+  const [robot_state_cam, setRobotStateCam] = React.useState(null);
+  const [theta_body_cam, setThetaBodyCam] = React.useState([0, 0, 0, 0, 0, 0]);
+
   // Collision Check
   const [collision, setCollision] = React.useState(false);
+
+  // Controller Euler Offset
+  const [offset_mode_left, setOffsetModeL] = React.useState(0);
+  const [offset_mode_right, setOffsetModeR] = React.useState(0);
+
+  const [VR_Control_Mode, setControlMode] = React.useState('inSpace');
+
 
   /* ---------------------- Right Arm Initialize ------------------------------------*/
   const [position_ee, setPositionEE] = React.useState([0,0,0]);
@@ -333,17 +390,16 @@ export default function DynamicHome(props) {
   const euler_ee_Three = mr.worlr2three(euler_ee);
 
   React.useEffect(() => {
-    if (robotParams.left !== null && robotParams.right !== null) {
+    if (robotParams.right !== null) {
       const T0 = FK(robotParams.right, robotParams.right.jointInitial, VR_Control_Mode);
       const [R0, p0] = mr.TransToRp(T0);
       setThetaBody(robotParams.right.jointInitial);
-      // setThetaBodyGuess(robotParams.right.jointInitial);
       setPositionEE(p0);
       setREE(R0);
       setEuler(mr.RotMatToEuler(R0, Euler_order));
       console.log("Right Robot Arm Initialized");
     }
-  }, [robotParams.left, robotParams.right]);
+  }, [robotParams.right]);
 
   React.useEffect(() => {
     if (rendered) {
@@ -368,17 +424,18 @@ export default function DynamicHome(props) {
   const euler_ee_Three_left = mr.worlr2three(euler_ee_left);
 
   React.useEffect(() => {
-    if (robotParams.left !== null && robotParams.right !== null) {
-      const T0_left = FK(robotParams.left, robotParams.left.jointInitial, VR_Control_Mode);
+    if (robotParams.left !== null) {
+      const jointInitial_left = deg2rad([0, 115-90, -42+169.997,-90,58,0])
+      // const jointInitial_left = robotParams.left.jointInitial;
+      const T0_left = FK(robotParams.left, jointInitial_left, VR_Control_Mode);
       const [R0_left, p0_left] = mr.TransToRp(T0_left);
-      setThetaBodyLeft(robotParams.left.jointInitial);
-      // setThetaBodyGuessLeft(robotParams.left.jointInitial);
+      setThetaBodyLeft(jointInitial_left);
       setPositionEELeft(p0_left);
       setREELeft(R0_left);
       setEulerEELeft(mr.RotMatToEuler(R0_left, Euler_order));
       console.log("Left Robot Arm Initialized");
     }
-  }, [robotParams.left, robotParams.right]);
+  }, [robotParams.left]);
 
   React.useEffect(() => {
     if (rendered){
@@ -439,7 +496,7 @@ export default function DynamicHome(props) {
   ]);
 
   /*** Rotation Update ***/
-  const vr_controller_R_current = vrquatToR(controller_object.quaternion, VR_Control_Mode);
+  const vr_controller_R_current = vrquatToR(controller_object.quaternion, VR_Control_Mode, 'right', offset_mode_right);
 
   // Store initial rotation matrix when trigger is first pressed
   const lastRotationMatrixRef = React.useRef(null);
@@ -529,15 +586,18 @@ export default function DynamicHome(props) {
 
       const R_scale = 1.0
       const [R_screw, R_theta] = mynp.relativeRMatrixtoScrewAxis(vr_controller_R_relative);
-      const R_relative = mynp.ScrewAxisToRelativeRMatrix(R_screw, R_theta * R_scale); // Scale factor for rotation
 
       // Calculate the new orientation based on the relative rotation matrix
       let newT;
       if (VR_Control_Mode === 'inSpace') {
+        // 旋量的旋转轴和旋转角是不变的
+        const R_screw_world = [-R_screw[2], -R_screw[0], R_screw[1]];
+        const R_relative = mynp.ScrewAxisToRelativeRMatrix(R_screw_world, R_theta * R_scale); 
         const newR_inSpace = mr.matDot(R_relative, currentR);
         newT = mr.RpToTrans(newR_inSpace, newP);
       }
       else if (VR_Control_Mode === 'inBody') {
+        const R_relative = mynp.ScrewAxisToRelativeRMatrix(R_screw, R_theta * R_scale); 
         const newR_inBody = mr.matDot(currentR, R_relative);
         newT = mr.RpToTrans(newR_inBody, newP);
       }
@@ -549,6 +609,7 @@ export default function DynamicHome(props) {
       const { new_theta_body, error_code } = IK_joint_velocity_limit(newT, robotParams.right, theta_body, VR_Control_Mode);
       setThetaBody(new_theta_body);
       setErrorCode(error_code);
+
     }
   }, [
     vr_controller_p_diff,
@@ -566,12 +627,12 @@ export default function DynamicHome(props) {
   }
   React.useEffect(() => {
     let intervalId = null;
-    if (grip_on && button_a_on) {
+    if (button_b_on) {
       intervalId = setInterval(() => {
         setThetaTool(prev => clampTool(prev + 0.5));
       }, 16.67); 
     }
-    else if (grip_on && button_b_on) {
+    else if (button_a_on) {
       intervalId = setInterval(() => {
         setThetaTool(prev => clampTool(prev - 0.5));
       }, 16.67); 
@@ -579,7 +640,7 @@ export default function DynamicHome(props) {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [ button_a_on, button_b_on, grip_on]);
+  }, [ button_a_on, button_b_on]);
 
 
   /*======================= VR Right Left Arm Control ====================================*/
@@ -627,7 +688,7 @@ export default function DynamicHome(props) {
   ]);
 
   /*** Rotation Update ***/
-  const vr_controller_R_current_left = vrquatToR(controller_object_left.quaternion, VR_Control_Mode);
+  const vr_controller_R_current_left = vrquatToR(controller_object_left.quaternion, VR_Control_Mode, 'left', offset_mode_left);
 
   // Store initial rotation matrix when trigger is first pressed
   const lastRotationMatrixRef_left = React.useRef(null);
@@ -717,15 +778,17 @@ export default function DynamicHome(props) {
 
       const R_scale = 1.0
       const [R_screw_left, R_theta_left] = mynp.relativeRMatrixtoScrewAxis(vr_controller_R_relative_left);
-      const R_relative_left = mynp.ScrewAxisToRelativeRMatrix(R_screw_left, R_theta_left * R_scale); // Scale factor for rotation
 
       // Calculate the new orientation based on the relative rotation matrix
       let newT;
       if (VR_Control_Mode === 'inSpace') {
+        const R_screw_world = [-R_screw_left[2], -R_screw_left[0], R_screw_left[1]];
+        const R_relative_left = mynp.ScrewAxisToRelativeRMatrix(R_screw_world, R_theta_left * R_scale); // Scale factor for rotation
         const newR_inSpace = mr.matDot(R_relative_left, currentR_left);
         newT = mr.RpToTrans(newR_inSpace, newP);
       }
       else if (VR_Control_Mode === 'inBody') {
+        const R_relative_left = mynp.ScrewAxisToRelativeRMatrix(R_screw_left, R_theta_left * R_scale); // Scale factor for rotation
         const newR_inBody = mr.matDot(currentR_left, R_relative_left);
         newT = mr.RpToTrans(newR_inBody, newP);
       }
@@ -750,12 +813,12 @@ export default function DynamicHome(props) {
   /*---------------------------- Left Arm Tool Control ----------------------------------------*/
   React.useEffect(() => {
     let intervalId = null;
-    if (grip_on_left && button_x_on) {
+    if (button_y_on) {
       intervalId = setInterval(() => {
         setThetaToolLeft(prev => clampTool(prev + 0.5));
       }, 16.67); 
     }
-    else if (grip_on_left && button_y_on) {
+    else if (button_x_on) {
       intervalId = setInterval(() => {
         setThetaToolLeft(prev => clampTool(prev - 0.5));
       }, 16.67); 
@@ -763,7 +826,27 @@ export default function DynamicHome(props) {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [ button_x_on, button_y_on, grip_on_left]);
+  }, [ button_x_on, button_y_on]);
+  
+
+  React.useEffect(() => {
+      // if (thumbstick_down_left) {
+      //   setOffsetModeL((prevMode) => (prevMode + 1) % 3); 
+      //   console.log("Controller offset change Left:", (offset_mode_left + 1) % 3); 
+      //   setThumbstickDownLeft(false); 
+      // }
+      // else if (thumbstick_down_right) {
+      //   setOffsetModeR((prevMode) => (prevMode + 1) % 3);
+      //   console.log("Controller offset change Right:", (offset_mode_right + 1) % 3);
+      //   setThumbstickDownRight(false);
+      // }
+      if (thumbstick_down_left && thumbstick_down_right) {
+        setControlMode((prevMode) => (prevMode === 'inBody' ? 'inSpace' : 'inBody'));
+        console.log("Controller mode change:", (VR_Control_Mode === 'inBody' ? 'inSpace' : 'inBody'));
+        setThumbstickDownLeft(false);
+        setThumbstickDownRight(false);
+      }
+  }, [thumbstick_down_left, thumbstick_down_right]);
 
 
   /*========================= Collision Check ================================*/
@@ -789,6 +872,99 @@ export default function DynamicHome(props) {
       }
     }
   }, [collision, theta_body, theta_body_left]);
+
+  /* ====================== CAM Arm Control =======================================*/
+
+  /* ---------------------- CAM Arm Initialize ------------------------------------*/
+  const [position_ee_cam, setPositionEECam] = React.useState([0,0,0]);
+  const [euler_ee_cam, setEulerEECam] = React.useState([0,0,0]);
+  const [R_ee_cam, setREECam] = React.useState(
+    [1,0,0],
+    [0,1,0],
+    [0,0,1]
+  );
+
+  const position_ee_Three_cam = mr.worlr2three(position_ee_cam);
+  const euler_ee_Three_cam = mr.worlr2three(euler_ee_cam);
+
+  React.useEffect(() => {
+    if (robotParams.cam !== null) {
+      const T0_cam = FK(robotParams.cam, robotParams.cam.jointInitial, VR_Control_Mode);
+      const [R0_cam, p0_cam] = mr.TransToRp(T0_cam);
+      setThetaBodyCam(robotParams.cam.jointInitial);
+      setPositionEECam(p0_cam);
+      setREECam(R0_cam);
+      setEulerEECam(mr.RotMatToEuler(R0_cam, Euler_order));
+      console.log("Camera Arm Initialized", robotParams.cam.jointInitial);
+    }
+  }, [robotParams.cam]);
+
+  React.useEffect(() => {
+    if (rendered){
+      const T_cam = FK(robotParams.cam, theta_body_cam, VR_Control_Mode);
+      const [R_cam, p_cam] = mr.TransToRp(T_cam);
+      setPositionEECam(p_cam);
+      setEulerEECam(mr.RotMatToEuler(R_cam, Euler_order)); 
+      setREECam(R_cam);
+      // console.log("Camera FK Updated", theta_body_cam);
+    }
+  }, [rendered, theta_body_cam]);
+
+
+  /* ---------------------- CAM Arm Control ------------------------------------*/
+  // Pose control
+  React.useEffect(() => {
+    if (rendered && vrModeRef.current) {
+      const euler_sensitivity = 0.010
+      const position_sensitivity = 0.002
+
+      let euler
+      if (grip_on) {
+        euler = [
+          thumbstick_left[0] * euler_sensitivity,
+          thumbstick_right[0] * euler_sensitivity,
+          thumbstick_right[1] * euler_sensitivity
+        ]
+      }
+      else {
+        euler = [0, 0, 0]
+      }
+
+      const R_relative = mr.EulerToRotMat(euler, Euler_order);
+
+      // In Body
+      const R_cam = mr.matDot(R_ee_cam, R_relative);
+
+      // In Space
+      // const R_cam = mr.matDot(R_relative, R_ee_cam);
+
+      let position_diff
+      if (grip_on_left){      
+        position_diff = [ 
+          thumbstick_left[0] * position_sensitivity, 
+          thumbstick_left[1] * position_sensitivity, 
+          -thumbstick_right[1] * position_sensitivity]
+      }
+      else{
+        position_diff = [0, 0, 0]
+      }
+
+      const position_relative = mr.matDot(R_ee_cam, position_diff);
+
+      const P_cam = [
+        position_ee_cam[0] + position_relative[0],
+        position_ee_cam[1] + position_relative[1],
+        position_ee_cam[2] + position_relative[2]
+      ]
+
+      const T_cam = mr.RpToTrans(R_cam, P_cam);
+
+      const { new_theta_body, error_code } = IK_joint_velocity_limit(T_cam, robotParams.cam, theta_body_cam, 'inBody');
+      setThetaBodyCam(new_theta_body);
+      setErrorCodeCam(error_code);
+    }
+
+  }, [rendered, vrModeRef.current, thumbstick_left, thumbstick_right, grip_on, grip_on_left]);
 
 
   /* ========================= Web Controller Inputs =========================*/
@@ -830,6 +1006,8 @@ export default function DynamicHome(props) {
       set_grip_on,
       set_button_a_on,
       set_button_b_on,
+      setThumbstickRight,
+      setThumbstickDownRight,
 
       // Left Controller
       set_controller_object_left,
@@ -837,6 +1015,9 @@ export default function DynamicHome(props) {
       set_grip_on_left,
       set_button_x_on,
       set_button_y_on,
+      setThumbstickLeft,
+      setThumbstickDownLeft,
+      setShowMenu,
 
       //Collision Check
       collision,
@@ -872,6 +1053,11 @@ export default function DynamicHome(props) {
     thetaToolLeftMQTT.current = theta_tool_left;
   }, [theta_tool_left]);
 
+  const thetaBodyCamMQTT = React.useRef(theta_body_cam);
+  React.useEffect(() => {
+    thetaBodyCamMQTT.current = theta_body_cam;
+  }, [theta_body_cam]);
+
   React.useEffect(() => {
     window.requestAnimationFrame(onAnimationMQTT);
   }, []);
@@ -884,6 +1070,7 @@ export default function DynamicHome(props) {
       tool: thetaToolMQTT.current,
       joint_left: thetaBodyLeftMQTT.current,
       tool_left: thetaToolLeftMQTT.current,
+      cam: thetaBodyCamMQTT.current
     });
     // publishMQTT(MQTT_ROBOT_STATE_TOPIC + robotIDRef.current , robot_state_json); 
     // console.log("onAnimationMQTT published:", robot_state_json);
@@ -903,9 +1090,11 @@ export default function DynamicHome(props) {
         joint: thetaBodyMQTT.current,
         tool: thetaToolMQTT.current,
         joint_left: thetaBodyLeftMQTT.current,
-        tool_left: thetaToolLeftMQTT.current
+        tool_left: thetaToolLeftMQTT.current,
+        cam: thetaBodyCamMQTT.current
       });
       publishMQTT(MQTT_CTRL_TOPIC + robotIDRef.current, ctl_json);
+      // console.log("onXRFrameMQTT published:", MQTT_CTRL_TOPIC + robotIDRef.current, ctl_json);
     }
   }
 
@@ -933,6 +1122,13 @@ export default function DynamicHome(props) {
     }
   }, [robot_state_left]);
 
+  const [theta_body_cam_feedback, setThetaBodyCamFeedback] = React.useState([0, 0, 0, 0, 0, 0]);
+  React.useEffect(() => {
+    if (robot_state_cam === "initialize") {
+      setThetaBodyCam(theta_body_cam_feedback)
+    }
+  }, [robot_state_cam]);
+
   useMqtt({
     // MQTT Client and Topics
     props,
@@ -953,14 +1149,19 @@ export default function DynamicHome(props) {
     thetaToolLeftMQTT: setThetaToolLeft,
     thetaBodyLeftFeedback: setThetaBodyLeftFeedback,
     robot_state_left: setRobotStateLeft,
-    
+
+    // Cam Arm
+    thetaBodyCamMQTT: setThetaBodyCam,
+    thetaBodyCamFeedback: setThetaBodyCamFeedback,
+    robot_state_cam: setRobotStateCam
+
   });
 
   /* ============================= Robot State Update ==========================================*/
   // Robot State Update Props
   const robotProps = React.useMemo(() => ({
-    robotNameList, robotName, theta_body, theta_tool, theta_body_left, theta_tool_left,
-  }), [robotNameList, robotName, theta_body, theta_tool, theta_body_left, theta_tool_left]);
+    robotNameList, robotName, theta_body, theta_tool, theta_body_left, theta_tool_left, theta_body_cam
+  }), [robotNameList, robotName, theta_body, theta_tool, theta_body_left, theta_tool_left, theta_body_cam]);
   
   // Robot Secene Render
   return (
@@ -969,7 +1170,7 @@ export default function DynamicHome(props) {
         onVideoStream1={setWebcamStream1}
         onVideoStream2={setWebcamStream2} />
       <RobotScene
-        robot_model={robot_model}
+        robot_list={robot_list}
         rendered={rendered}
 
         robotProps={robotProps}
@@ -997,7 +1198,12 @@ export default function DynamicHome(props) {
         euler_ee_left={euler_ee_Three_left}
         vr_controller_pos_left={vr_controller_pos_left}
         vr_controller_R_left={vr_controller_R_current_left}
- 
+
+        // CAM Arm
+        state_codes_cam={error_code_cam}
+        position_ee_cam={position_ee_Three_cam}
+        euler_ee_cam={euler_ee_Three_cam}
+
         modelOpacity={modelOpacity}
         webcamStream1={webcamStream1}
         webcamStream2={webcamStream2}

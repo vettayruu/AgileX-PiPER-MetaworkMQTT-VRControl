@@ -7,8 +7,8 @@ console.log("Package_Info",package_info.name, package_info.version);
 export const codeType = package_info.name; // software name
 const version = package_info.version; // version number
 
-const MQTT_BROKER_URL = "wss://sora2.uclab.jp/mqws"; // For Nagoya-U UCLab Development
-// const MQTT_BROKER_URL = "wss://192.168.197.37:8084"; // For Local Development
+// const MQTT_BROKER_URL = "wss://sora2.uclab.jp/mqws"; // For Nagoya-U UCLab Development
+const MQTT_BROKER_URL = "wss://192.168.197.29:8333"; // For Local Development
 
 import {userUUID} from './cookie_id';
 

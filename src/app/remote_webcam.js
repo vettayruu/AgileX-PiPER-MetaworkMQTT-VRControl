@@ -7,18 +7,19 @@ export default function RemoteWebcam({ onVideoStream1, onVideoStream2 }) {
   React.useEffect(() => {
     if (soraReady && window.Sora) {
       // Video streaming setup
-      const signalingUrl = 'wss://sora.uclab.jp/signaling';
+      // const signalingUrl = 'wss://sora.uclab.jp/signaling';
+      const signalingUrl = 'wss://sora2.uclab.jp/signaling';
       const sora = window.Sora.connection(signalingUrl);
 
       const options = {
         role: 'recvonly',
         multistream: true,
-        video: { codecType: 'VP9', resolution: 'HD', bitrate: 1500 },
+        video: { codecType: 'VP9', resolution: '1080p', bitrate: 1500 },
         audio: false,
       };
 
       // Webcam 1
-      const recvonly_webcam1 = sora.recvonly('sora_liust', options);
+      const recvonly_webcam1 = sora.recvonly('sora_liust_left', options);
       recvonly_webcam1.on('track', event => {
         if (event.track.kind === 'video') {
           const mediaStream = new MediaStream();
@@ -29,7 +30,7 @@ export default function RemoteWebcam({ onVideoStream1, onVideoStream2 }) {
       recvonly_webcam1.connect();
 
       // Webcam 2
-      const recvonly_webcam2 = sora.recvonly('sora_liust_2', options);
+      const recvonly_webcam2 = sora.recvonly('sora_liust_right', options);
       recvonly_webcam2.on('track', event => {
         if (event.track.kind === 'video') {
           const mediaStream = new MediaStream();

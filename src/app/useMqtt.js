@@ -22,6 +22,11 @@ export default function useMqtt({
   thetaBodyLeftFeedback,
   robot_state_left,
 
+  // Cam Arm
+  thetaBodyCamMQTT,
+  thetaBodyCamFeedback,
+  robot_state_cam
+
 }) {
   useEffect(() => {
   // connect to MQTT broker  
@@ -96,7 +101,20 @@ export default function useMqtt({
           return prev;
         });
       }
+
+      /* Cam Arm */
+      if (data.cam != undefined) {
+        thetaBodyCamMQTT(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(data.cam)) {
+            return data.cam;
+          }
+          console.log("Time:", data.time, "From:", topic, "Send Joint Body Cam:", data.cam);
+          return prev;
+        });
+      }
     }
+
+
 
     // Subscribe Robot State from Robot
     if (!props.viewer && topic === MQTT_ROBOT_STATE_TOPIC + robotIDRef.current) {
@@ -120,29 +138,47 @@ export default function useMqtt({
       if (data.tool != undefined) {
         // console.log("Right Arm Current Tool Action:", data.tool);
       }
-    }
-
-    /* Left Arm */
-    if (data.state_left != undefined) {
-        console.log("Left Arm State:", data.state_left);
-        robot_state_left(data.state_left);
-      }
-    if (data.model_left != undefined) {
-        console.log("Left Arm Model:", data.model_left);
-      }
-    if (data.joint_feedback_left != undefined) {
-      thetaBodyLeftFeedback(prev => {
-        if (JSON.stringify(prev) !== JSON.stringify(data.joint_feedback_left)) {
-          return data.joint_feedback_left;
+    
+      /* Left Arm */
+      if (data.state_left != undefined) {
+          console.log("Left Arm State:", data.state_left);
+          robot_state_left(data.state_left);
         }
-        // console.log("From:", topic, "Recive Left Arm Joint Feedback Left:", data.joint_feedback_left);
-        return prev;
-      });
-    }
-    if (data.tool_left != undefined) {
-      // console.log("Left Arm Current Tool Action:", data.tool_left);
-    }
+      if (data.model_left != undefined) {
+          console.log("Left Arm Model:", data.model_left);
+        }
+      if (data.joint_feedback_left != undefined) {
+        thetaBodyLeftFeedback(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(data.joint_feedback_left)) {
+            return data.joint_feedback_left;
+          }
+          // console.log("From:", topic, "Recive Left Arm Joint Feedback Left:", data.joint_feedback_left);
+          return prev;
+        });
+      }
+      if (data.tool_left != undefined) {
+        // console.log("Left Arm Current Tool Action:", data.tool_left);
+      }
 
+      /* Cam Arm */
+      if (data.state_cam != undefined) {
+        console.log("Cam Arm State:", data.state_cam);
+        robot_state_cam(data.state_cam);
+      }
+      if (data.model_cam != undefined) {
+        console.log("Cam Arm Model:", data.model_cam);
+      }
+      if (data.joint_feedback_cam != undefined) {
+        thetaBodyCamFeedback(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(data.joint_feedback_cam)) {
+            return data.joint_feedback_cam;
+          }
+          // console.log("From:", topic, "Recive Cam Arm Joint Feedback:", data.joint_feedback_cam);
+          return prev;
+        });
+      }
+      
+    }
   };
 
   window.mqttClient.on('message', handler);

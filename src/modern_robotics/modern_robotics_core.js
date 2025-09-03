@@ -213,9 +213,11 @@ function rad2deg(rad) {
 }
 
 function worlr2three(v) {
-    const R_three = [[0, -1, 0],
-                [0,  0, 1],
-                [-1, 0, 0]]
+    const R_three = [
+        [0, -1, 0],
+        [0,  0, 1],
+        [-1, 0, 0]
+    ]
     return matDot(R_three, v);
 }
 
@@ -1540,7 +1542,7 @@ function JacobianSpace(Slist, thetalist) {
 function IKinBody(Blist, M, T, thetalist0, eomg, ev) {
     let thetalist = thetalist0.slice();
     let i = 0;
-    const maxiterations = 50;
+    const maxiterations = 20;
     let Tsb = FKinBody(M, Blist, thetalist);
     let Vb = se3ToVec(MatrixLog6(matDot(TransInv(Tsb), T)));
     let err = (Norm(Vb.slice(0, 3)) > eomg) || (Norm(Vb.slice(3, 6)) > ev);
@@ -1596,7 +1598,7 @@ function IKinBody(Blist, M, T, thetalist0, eomg, ev) {
 function IKinSpace(Slist, M, T, thetalist0, eomg, ev) {
     let thetalist = thetalist0.slice();
     let i = 0;
-    const maxiterations = 50;
+    const maxiterations = 20;
     let Tsb = FKinSpace(M, Slist, thetalist);
     let Vs = matDot(Adjoint(Tsb), se3ToVec(MatrixLog6(matDot(TransInv(Tsb), T))));
     let err = (Norm(Vs.slice(0, 3)) > eomg) || (Norm(Vs.slice(3, 6)) > ev);

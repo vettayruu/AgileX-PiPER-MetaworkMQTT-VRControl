@@ -7,7 +7,7 @@ const mr = require('../modern_robotics/modern_robotics_core.js');
  * @param {string} mode - Calculation mode: 'inSpace' or 'inBody'
  * @returns {Array<Array<number>>} - Relative rotation matrix (3x3)
  */
-function calculateRelativeRotationMatrix (currentR, initialR, mode = 'inBody') {
+function calculateRelativeRotationMatrix (currentR, initialR, mode) {
   if (!initialR) {
     // If no initial matrix, return identity matrix
     return [

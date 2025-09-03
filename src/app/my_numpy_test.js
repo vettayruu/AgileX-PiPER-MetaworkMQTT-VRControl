@@ -54,8 +54,8 @@ const mynp = require('../modern_robotics/my_numpy.js');
 
 // testComplexRotation();
 
-const axis_body = [0, 0.70710678, 0.70710678]
-const theta = 1.5707963267948966
-const R_relative = mynp.ScrewAxisToRelativeRMatrix(axis_body, theta);
-console.log("相对旋转矩阵 R_relative:");
-console.table(R_relative.map(row => row.map(val => val.toFixed(3))));
+// const axis_body = [0, 0.70710678, 0.70710678]
+// const theta = 1.5707963267948966
+// const R_relative = mynp.ScrewAxisToRelativeRMatrix(axis_body, theta);
+// console.log("相对旋转矩阵 R_relative:");
+// console.table(R_relative.map(row => row.map(val => val.toFixed(3))));
