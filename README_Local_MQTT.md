@@ -79,3 +79,18 @@ mosquitto -v
 
 ## 5. Test Your MQTT Broker
 
+Test publish topic, run `locat_mqtt_test.py` in the folder `Agilex-PiPER-MetaworkMQTT`.
+
+```
+python local_mqtt_test.py
+```
+
+Test subscribe topic, run `MQTT_Topic_list.py`
+
+```
+python MQTT_Topic_list.py
+```
+
+You can also use `MQTT_Topic_list` to confirm the UUID from VR device with the topic `mgr/request`.
+
+
