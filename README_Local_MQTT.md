@@ -74,6 +74,9 @@ After verifying, you can use your local MQTT server for communication in your lo
 
 ```
 cd "C:\Program Files\mosquitto"
+```
+
+```
 mosquitto -v
 ```
 
