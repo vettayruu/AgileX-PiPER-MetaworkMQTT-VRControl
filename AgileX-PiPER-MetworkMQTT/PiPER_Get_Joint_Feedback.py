@@ -22,7 +22,7 @@ def get_joint_feedback_mr(msg, factor):
     joint_5 = msg.joint_state.joint_5 / factor
     joint_6 = msg.joint_state.joint_6 / factor
 
-    theta_Body_feedback = [joint_1, joint_2 - np.radians(90), joint_3 + np.radians(169.997), joint_4, joint_5 + 0.03, joint_6]
+    theta_Body_feedback = [joint_1, joint_2 - np.radians(90), joint_3 + np.radians(169.997), joint_4, joint_5, joint_6]
     return theta_Body_feedback
 
 # 测试代码
