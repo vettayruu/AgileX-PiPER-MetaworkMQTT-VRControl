@@ -37,7 +37,7 @@ def enable_fun(piper: C_PiperInterface_V2):
                       piper.GetArmLowSpdInfoMsgs().motor_6.foc_status.driver_enable_status
         print("使能状态:", enable_flag)
         piper.EnableArm(7)
-        piper.GripperCtrl(0, 1000, 0x01, 0)
+        # piper.GripperCtrl(0, 1000, 0x01, 0)
         print("--------------------")
         # 检查是否超过超时时间
         if elapsed_time > timeout:
@@ -95,24 +95,19 @@ if __name__ == "__main__":
     piper.ConnectPort()
     piper.EnableArm(7)
     enable_fun(piper=piper)
-    # piper.DisableArm(7)
-    piper.GripperCtrl(0, 1000, 0x01, 0)
     factor = 57295.7795  # joint motor signal: 1000*180/3.1415926, rad as input and degree*1000 as control signal
 
     # initialize shared memory
     recv = MQTT_Recv()
-    # thetaBody_initial = np.array([0, -0.27473, 1.44144, 0, 1.22586, 0])
-    # arr[8:14] = thetaBody_initial # Initial joint angles
-    # arr[15] = 0.0  # Initial tool angle
     print("Shared memory PiPER created and initialized.")
 
     # Control Parameter
-    Tf = 0.010
+    Tf = 0.015
     dt = 0.002
-    N = int(Tf/dt)
+    N = 5
     method = 5
-    Kp = 0.60
-    Kd = 0.02
+    Kp = 0.7
+    Kd = 0.035
 
     prev_error = np.zeros(6)
 
@@ -122,6 +117,9 @@ if __name__ == "__main__":
         print("shared memory name：", shm.name)
         time.sleep(0.1)
 
+        """
+        Check Robot State
+        """
         # Update joint message
         arr = recv.get_shared_memory()
         thetaBody = arr[8:14].astype(float)  # 6Dof robot
@@ -142,6 +140,7 @@ if __name__ == "__main__":
         time.sleep(1.0)
 
         print("shared memory:", arr)
+
         a = arr[0:6]
         b = arr[8:14]
         equal = np.allclose(a, b)
@@ -156,24 +155,30 @@ if __name__ == "__main__":
             print("Robot Not Ready. Please check VR control communication.")
 
         while equal:
-
-
             # Update joint message
             thetaBody = arr[8:14].astype(float)  # 6Dof robot
+            thetaBody = [round(x, 4) for x in thetaBody]
+            thetaBody = np.array(thetaBody)
+
             thetaTool = arr[15].astype(float)
 
             # Get joint feedback
             joint_feedback = get_joint_feedback_mr(msg, factor)
-            joint_feedback = np.array(joint_feedback)  # 当前角度（rad）
+            joint_feedback = [round(x, 4) for x in joint_feedback]
+            joint_feedback = np.array(joint_feedback)
             arr[0:6] = joint_feedback
-            # print("shared_memory", arr)
 
             error = thetaBody - joint_feedback
             d_error = (error - prev_error) / Tf
             mse = np.mean(error ** 2)  # Mean Square Error
+            rmse = np.sqrt(mse)
 
-            # P control
-            # control_signal = joint_feedback + Kp * error
+            print("theta_body:", thetaBody)
+            print("feedback:", joint_feedback)
+            print("error", error)
+            print("derror", d_error)
+            print("mse", mse)
+            print("rmse", rmse)
 
             # PD control
             control_signal = joint_feedback + Kp * error + Kd * d_error
@@ -182,7 +187,7 @@ if __name__ == "__main__":
             # Trajectory Plan
             theta_current = joint_feedback
             theta_target =control_signal
-            if mse > 5e-6:
+            if rmse > 0.002:
                 theta_traj = mr.JointTrajectory(theta_current, theta_target, Tf, N, method)
 
                 for theta in theta_traj:
@@ -192,18 +197,26 @@ if __name__ == "__main__":
                         round((theta[1] + np.radians(90)) * factor),
                         round((theta[2] - np.radians(169.997)) * factor),
                         round(theta[3] * factor),
-                        round((theta[4] - 0.03) * factor),
+                        round(theta[4] * factor),
                         round(theta[5] * factor)
                     ]
 
-                    piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
+                    piper.MotionCtrl_2(0x01, 0x01, 30, 0x00)
                     piper.JointCtrl(*joint_cmd)
-                    time.sleep(dt)
 
-            finger_pos = (((thetaTool) * 0.6) / 1000) + 0.0004 # /mm
-            joint_tool = round(finger_pos * 1000 * 1000)
-            piper.GripperCtrl(abs(joint_tool), 1000, 0x01, 0)
-            # time.sleep(Tf)
+                    finger_pos = (((thetaTool) * 0.85) / 1000) + 0.0004  # /mm
+                    joint_tool = round(finger_pos * 1000 * 1000)
+                    piper.GripperCtrl(abs(joint_tool), 1000, 0x01, 0)
+
+                    # print(piper.GetArmStatus())
+                    # print(piper.GetArmLowSpdInfoMsgs())
+
+                    time.sleep(dt)
+            else:
+                finger_pos = (((thetaTool) * 0.85) / 1000) + 0.0004  # /mm
+                joint_tool = round(finger_pos * 1000 * 1000)
+                piper.GripperCtrl(abs(joint_tool), 1000, 0x01, 0)
+                time.sleep(dt)
 
     except KeyboardInterrupt:
         print("MQTT Recv Stopped")
