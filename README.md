@@ -206,8 +206,8 @@ The following input mappings are used to operate the PiPER robot via the VR cont
 | Input Combination         | Action       |
 |---------------------------|--------------|
 | Trigger                   | Move the robot (6-DoF pose) |
-| Grip + Button A           | Release  |
-| Grip + Button B           | Grasp   |
+| Button A           | Grasp   |
+| Button B           | Release  |
 
 > Make sure the controller is tracked and visible to the VR camera to ensure accurate input.
 
