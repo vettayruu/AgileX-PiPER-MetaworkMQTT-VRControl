@@ -196,8 +196,9 @@ You can also simulate teleoperation using [CoppeliaSim](https://www.coppeliarobo
 
    Visit:
    ```
-   https://192.168.197.39:3000/
+   https://192.168.197.**:****
    ```
+   > Check your terminal to confirm the IP address.
 
    Click the `AR` button to enter AR mode.
 
