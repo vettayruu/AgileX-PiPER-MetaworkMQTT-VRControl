@@ -297,12 +297,26 @@ After enter the VR mode, follow the steps below to control the **AgileX-PiPER** 
      python MQTT_teleoperation_cam.py
      ```
 
-   (Option) If you have a SORA WebRTC SFU server, you can also try teleoperation using WebRTC's data channel:
-
-   - **Right Arm via WebRTC:**
-     ```bash
-     python WebRTC_teleoperation_right.py
-     ```
+> (Optional) If you have a [SORA WebRTC SFU](https://sora.shiguredo.jp/) server, you can also try teleoperation using WebRTC's data channel:
+> 
+> - **Right Arm via WebRTC:**
+>   ```bash
+>   python WebRTC_teleoperation_right.py
+>   ```
+> 
+> **Other WebRTC applications and their features:**
+>
+> - [LiveKit](https://github.com/livekit/client-sdk-js):  
+>   Open-source, scalable WebRTC platform. Provides SDKs for multiple languages and supports advanced features like recording and media routing. Suitable for real-time communication and robotics teleoperation.
+>
+> - [Amazon KVS](https://github.com/awslabs/amazon-kinesis-video-streams-webrtc-sdk-js/tree/master):  
+>   Node.js-based, cloud-hosted by AWS. Offers secure, scalable signaling and media relay. Good for integration with AWS infrastructure and IoT devices.
+>
+> - [aiortc](https://github.com/aiortc/aiortc):  
+>   Python-based, free and open-source. Lightweight and easy to customize, but requires users to implement signaling and media handling logic. Suitable for research and rapid prototyping.
+>
+> - Other Open Source WebRTCs (keep updating):
+>   https://github.com/rtc-io/rtc-quickconnect 
 
 5. **Visual Assistance**
 
