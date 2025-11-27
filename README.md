@@ -149,6 +149,12 @@ To check all topics in MQTT, run:
 python MQTT_Topic_list.py
 ```
 
+### 6. Change your MQTT Broker URL
+The MQTT brkoer URL changes based on your network, it may different with this sample code.
+To change the MQTT broker URL, open the script `/src/lib/MetaworkMQTT.js`, and change `MQTT_BROKER_URL` with your URL.
+
+⚠️ And don't forget to verify the new MQTT broker URL after changing.
+
 ---
 ## Step 3: Debug with WebXR and Simulator
 
