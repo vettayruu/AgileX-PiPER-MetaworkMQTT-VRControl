@@ -149,11 +149,21 @@ To check all topics in MQTT, run:
 python MQTT_Topic_list.py
 ```
 
-### 6. Change your MQTT Broker URL
-The MQTT brkoer URL changes based on your network, it may different with this sample code.
-To change the MQTT broker URL, open the script `/src/lib/MetaworkMQTT.js`, and change `MQTT_BROKER_URL` with your URL.
+### 6. Configure Your MQTT Broker URL
 
-⚠️ And don't forget to verify the new MQTT broker URL after changing.
+The MQTT broker URL depends on your network environment and may differ from the sample code.  
+**To update the MQTT broker URL:**
+
+**(1) Web Interface Configuration**  
+Open `/src/lib/MetaworkMQTT.js` and set the `MQTT_BROKER_URL` variable to your broker's URL.
+
+> ⚠️ **Remember to verify the new MQTT broker URL after making changes.**
+
+**(2) Robot Controller Configuration**  
+Ensure the robot controller uses the same broker URL as the server.  
+Open `/Robot_Control/MQTT/MQTT_Client.py` and update the `MQTT_LOCAL_SERVER` variable with your broker's URL.
+
+> ⚠️ **After updating, verify the MQTT connection on your robot controller's PC.**
 
 ---
 ## Step 3: Debug with WebXR and Simulator
