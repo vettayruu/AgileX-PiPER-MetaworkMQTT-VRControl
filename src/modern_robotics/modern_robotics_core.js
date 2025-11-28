@@ -193,6 +193,7 @@ function matAddN(...matrices) {
     return result;
 }
 
+/* This was the original version that computed the pseudo-inverse incorrectly. It can not sovle the 6x7 matrix case correctly */
 // function matPinv(A) {
 //     // SVD-based pseudo-inverse
 //     const svd = numeric.svd(A);
@@ -210,6 +211,7 @@ function matAddN(...matrices) {
 //     return numeric.dot(numeric.dot(V, Splus), numeric.transpose(U));
 // }
 
+/* Fixed version: it can solve the 6x7 matrix case correctly */
 function matPinv(A) {
     // A: 6×7
     const AT = numeric.transpose(A); // 7×6
