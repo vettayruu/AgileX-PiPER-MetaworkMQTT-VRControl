@@ -193,9 +193,27 @@ function matAddN(...matrices) {
     return result;
 }
 
+// function matPinv(A) {
+//     // SVD-based pseudo-inverse
+//     const svd = numeric.svd(A);
+//     const U = svd.U;
+//     const S = svd.S;
+//     const V = svd.V;
+//     const tol = 1e-6;
+//     // S+ 
+//     const S_inv = S.map(s => (Math.abs(s) > tol ? 1 / s : 0));
+//     let Splus = numeric.rep([V[0].length, U[0].length], 0);
+//     for (let i = 0; i < S_inv.length; i++) {
+//         Splus[i][i] = S_inv[i];
+//     }
+//     // V * S+ * U^T
+//     return numeric.dot(numeric.dot(V, Splus), numeric.transpose(U));
+// }
+
 function matPinv(A) {
-    // SVD-based pseudo-inverse
-    const svd = numeric.svd(A);
+    // A: 6×7
+    const AT = numeric.transpose(A); // 7×6
+    const svd = numeric.svd(AT);    // SVD on 7×6
     const U = svd.U;
     const S = svd.S;
     const V = svd.V;
@@ -206,8 +224,9 @@ function matPinv(A) {
     for (let i = 0; i < S_inv.length; i++) {
         Splus[i][i] = S_inv[i];
     }
-    // V * S+ * U^T
-    return numeric.dot(numeric.dot(V, Splus), numeric.transpose(U));
+    // Pseudo-inverse: V * S+ * U^T, then transpose back
+    const pinvT = numeric.dot(numeric.dot(V, Splus), numeric.transpose(U));
+    return numeric.transpose(pinvT); // Return 7×6 → 6×7
 }
 
 function deg2rad(deg) {
