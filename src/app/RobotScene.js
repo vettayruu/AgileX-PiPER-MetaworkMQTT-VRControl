@@ -3,9 +3,13 @@ import Assets from './Assets';
 import { Select_Robot } from './Model';
 import WebInterface from './web_interface.js';
 
+
+import {idtopic, publishMQTT, MQTT_ROBOT_DATA_TOPIC } from '../lib/MetaworkMQTT';
+
 export default function RobotScene(props) {
   const {
-    robot_list, 
+    time_offset,
+    robot_assets, 
     robotProps, 
     
     // VR
@@ -17,17 +21,15 @@ export default function RobotScene(props) {
     state_codes, 
     position_ee, 
     euler_ee, 
-    vr_controller_pos, 
-    vr_controller_R,
     rightArmPosition,
+    joint_limits_right,
 
     // Left Arm
     state_codes_left,
     position_ee_left, 
     euler_ee_left, 
-    vr_controller_pos_left, 
-    vr_controller_R_left,
     leftArmPosition,
+    joint_limits_left,
 
     // Cam Arm
     state_codes_cam,
@@ -35,11 +37,14 @@ export default function RobotScene(props) {
     euler_ee_cam,
 
     // Others
-    // modelOpacity, 
-    // webcamStream1, 
-    // webcamStream2,
-    // dsp_message,
     showMenu,
+    showVideo,
+    showModel,
+
+    // SAP BTP
+    apiData,
+    scanData,
+
   } = props;
 
   const getStateCodeColor = (code) => {
@@ -65,85 +70,445 @@ export default function RobotScene(props) {
   const euler_ee_deg_left = euler_ee_left.map(rad2deg);
   const euler_ee_deg_cam = euler_ee_cam.map(rad2deg);
 
-  const now = Date.now();
-  const [activeButton, setActiveButton] = React.useState(null);
+  const botton_width = "0.42";
+  const font_path = "/fonts/Roboto-msdf.json"; 
+
+  const [activeTaskId, setActiveTaskId] = React.useState(null);
+  const [activeProductId, setActiveProduct] = React.useState(null);
+  const [task_msg, setTaskMsg] = React.useState("");
   
-  const scale = 0.1;
-  const xAxis = {
-    x: vr_controller_R[0][0] * scale,
-    y: vr_controller_R[1][0] * scale,
-    z: vr_controller_R[2][0] * scale,
-  };
-  const yAxis = {
-    x: vr_controller_R[0][1] * scale,
-    y: vr_controller_R[1][1] * scale,
-    z: vr_controller_R[2][1] * scale,
-  };
-  const zAxis = {
-    x: vr_controller_R[0][2] * scale,
-    y: vr_controller_R[1][2] * scale,
-    z: vr_controller_R[2][2] * scale,
-  };
-
-  const xAxis_left = {
-    x: vr_controller_R_left[0][0] * scale,
-    y: vr_controller_R_left[1][0] * scale,
-    z: vr_controller_R_left[2][0] * scale,
-  };
-  const yAxis_left = {
-    x: vr_controller_R_left[0][1] * scale,
-    y: vr_controller_R_left[1][1] * scale,
-    z: vr_controller_R_left[2][1] * scale,
-  };
-  const zAxis_left = {
-    x: vr_controller_R_left[0][2] * scale,
-    y: vr_controller_R_left[1][2] * scale,
-    z: vr_controller_R_left[2][2] * scale,
-  };
-
   // Webcam Stream
   React.useEffect(() => {
-    if (props.webcamStream1) {
-      const videoEl = document.getElementById('leftVideo');
+    if (props.webcamStream1 && props.showVideo) {
+      const videoEl = document.getElementById('stereoVideo');
       if (videoEl && videoEl.srcObject !== props.webcamStream1) {
         videoEl.srcObject = props.webcamStream1;
-        videoEl.play();
+        // videoEl.play();
+        videoEl.play().catch(error => {
+          console.warn("Video play interrupted, likely due to component unmount:", error);
+        });
       }
     }
-  }, [now]);
+  }, [props.webcamStream1, props.showVideo]);
+
+  // React.useEffect(() => {
+  //   if (props.webcamStream2) {
+  //     const videoEl = document.getElementById('rightVideo');
+  //     if (videoEl && videoEl.srcObject !== props.webcamStream2) {
+  //       videoEl.srcObject = props.webcamStream2;
+  //       videoEl.play();
+  //     }
+  //   }
+  // }, [props.webcamStream2]);
+
+  // React.useEffect(() => {
+  //   if (props.webcamStream3) {
+  //     const videoEl = document.getElementById('subVideo');
+  //     if (videoEl && videoEl.srcObject !== props.webcamStream3) {
+  //       videoEl.srcObject = props.webcamStream3;
+  //       videoEl.play();
+  //     }
+  //   }
+  // }, [props.webcamStream3]);
+
+  const [vrcam_position, setVrcamPosition] = React.useState('0 0 0');
+  const [vrcam_rotation, setVrcamRotation] = React.useState('0 0 0');
+  React.useEffect(() => {
+    if (showVideo) {
+      setVrcamPosition("0 -0.035 -0.0")
+      setVrcamRotation("42.5 0 0")
+    } else {
+      setVrcamPosition("0 -0.15 -0.3")
+      setVrcamRotation("0 0 0")
+    }
+  }, [showVideo]);
+
+  const statusColors = {
+    ok: '#00FF00',
+    warn: '#FFCC00',
+    error: '#FF0000',
+    text: '#FFFFFF',
+    null: '#888888' 
+  };
+
+  // 1. 录制状态：true 为正在录制，false 为停止
+  const [isRecording, setIsRecording] = React.useState(false);
+  const [completedTaskIds, setCompletedTaskIds] = React.useState([]);
+  const [hasRecordedCurrentTask, setHasRecordedCurrentTask] = React.useState(false);
+
+  const [WTProduct, setWTProduct] = React.useState(null);
+  const [WTDestination, setWTDestination] = React.useState(null);
+  const [scanHistory, setScanHistory] = React.useState({
+    product: null,
+    destination: null,
+  });
+  const isProductMatch = React.useMemo(() => {
+    if (!scanHistory.product || !activeProductId) return false;
+    return String(scanHistory.product).trim().toLowerCase() === String(activeProductId).trim().toLowerCase();
+  }, [scanHistory.product, activeProductId]);
+
+  const [canComplete, setCanComplete] = React.useState(false);
 
   React.useEffect(() => {
-    if (props.webcamStream2) {
-      const videoEl = document.getElementById('rightVideo');
-      if (videoEl && videoEl.srcObject !== props.webcamStream2) {
-        videoEl.srcObject = props.webcamStream2;
-        videoEl.play();
-      }
+    setCanComplete(Boolean(
+      activeTaskId &&
+      !isRecording &&
+      hasRecordedCurrentTask &&
+      isProductMatch &&
+      WTDestination
+    ));
+  }, [activeTaskId, isRecording, hasRecordedCurrentTask, isProductMatch, WTDestination]);
+
+  const handleActivateTask = (taskItem) => {
+    setActiveTaskId(taskItem.warehouseTask);
+    setActiveProduct(taskItem.product);
+    setHasRecordedCurrentTask(false);
+    setWTProduct(null);                              // 👈 清空上个任务的 product
+    setWTDestination(null);                          // 👈 清空上个任务的 destination
+    setScanHistory({ product: null, destination: null }); // 👈 清空扫码历史
+    setTaskMsg(`Task ${taskItem.warehouseTask} activated.`);
+  };
+
+  const handleRecordControl = React.useCallback(async (action) => {
+        if (action === "start") {
+          publishMQTT(MQTT_ROBOT_DATA_TOPIC + idtopic, JSON.stringify({
+            header: {
+              "userID": apiData?.userID || "unknown_user",
+              "robot": apiData?.robot || "unknown_robot",
+              "warehouse": apiData?.warehouse || "unknown_warehouse",
+              "warehouseTask":activeTaskId || "N/A",
+              "product":activeProductId || "N/A",
+            },
+            time: Date.now() + time_offset, 
+            record: "on" 
+          }), 1);
+          setIsRecording(true);
+          setTaskMsg(`Start recording for task ${activeTaskId || "N/A"}.`);
+        } 
+        
+        else if (action === "stop") {
+          publishMQTT(MQTT_ROBOT_DATA_TOPIC + idtopic, JSON.stringify({ 
+            header: {
+              "userID": apiData?.userID || "unknown_user",
+              "robot": apiData?.robot || "unknown_robot",
+              "warehouse": apiData?.warehouse || "unknown_warehouse",
+              "warehouseTask":activeTaskId || "N/A",
+              "product":activeProductId || "N/A",
+            },
+            time: Date.now() + time_offset,
+            record: "off" 
+          }), 1);
+
+          if (isRecording) {
+            setHasRecordedCurrentTask(true); 
+          }
+          setIsRecording(false);
+          setTaskMsg(`Stop recording for task ${activeTaskId || "N/A"}.`);
+        } 
+        
+    }, [activeTaskId, isRecording]);
+
+  const handleCompleteCurrentTask = () => {
+    if (!activeTaskId) {
+      setTaskMsg("[Error] No active task to complete.");
+      return;
     }
-  }, [now]);
+
+    if (isRecording) {
+      setTaskMsg("[Error] Cannot complete task while recording! Please stop recording first.");
+      return;
+    }
+
+    if (!hasRecordedCurrentTask) {
+      setTaskMsg("[Error] You must start and stop recording at least once before completing the task.");
+      return;
+    }
+
+    if (!isProductMatch) {
+      setTaskMsg("[Error] Product does not match the active task. Please scan the correct product.");
+      return;
+    }
+
+    if (!WTDestination) {
+      setTaskMsg("[Error] Destination not scanned yet. Please scan the destination before completing.");
+      return;
+    }
+
+    setCompletedTaskIds((prev) => [...prev, activeTaskId]);
+    setTaskMsg(`Task ${activeTaskId} has been completed and locked.`);
+
+    setActiveTaskId(null);
+    setActiveProduct(null);
+    setHasRecordedCurrentTask(false);
+    setWTProduct(null);           
+    setWTDestination(null);       
+    setScanHistory({ product: null, destination: null }); 
+  };
 
   React.useEffect(() => {
-    if (props.webcamStream3) {
-      const videoEl = document.getElementById('subVideo');
-      if (videoEl && videoEl.srcObject !== props.webcamStream3) {
-        videoEl.srcObject = props.webcamStream3;
-        videoEl.play();
-      }
-    }
-  }, [now]);
+    if (!scanData?.value) return;
 
+    try {
+      const json = typeof scanData.value === "string"
+        ? JSON.parse(scanData.value)
+        : scanData.value;
+
+      if (json?.type && json?.id) {
+        if (json.type === "product") {
+          setWTProduct(json.id);
+          setScanHistory(prev => ({ ...prev, product: json.id }));
+        } else if (json.type === "destination") {
+          setWTDestination(json.id);
+          setScanHistory(prev => ({ ...prev, destination: json.id }));
+        }
+      }
+    } catch (e) {
+      console.error("扫码数据格式非合法 JSON:", scanData.value);
+    }
+  }, [scanData]); 
 
   if (!rendered) {
     return (
-      <a-scene xr-mode-ui="XRMode: ar">
-        <Assets robot_list={robot_list} viewer={props.viewer}/>
+      <a-scene xr-mode-ui="XRMode: xr">
+        <Assets robot_assets={robot_assets} viewer={props.viewer}/>
       </a-scene>
     );
-    }
+  }
 
   return (
     <>
-      <a-scene scene xr-mode-ui="XRMode: ar">
+      <a-scene 
+        scene 
+        xr-mode-ui="XRMode: xr"
+      >
+        {/* Robot Model*/}
+        <Assets robot_assets={robot_assets} viewer={props.viewer} monitor={props.monitor}/>
+
+        {/* Remote Cam*/}
+        <a-assets>
+          <video id="stereoVideo" autoPlay playsInline crossOrigin="anonymous" muted></video>
+        </a-assets>
+        {showModel && (
+          <a-entity position={vrcam_position} rotation={vrcam_rotation}>
+            <Select_Robot 
+              {...robotProps} 
+              // modelOpacity={props.modelOpacity}
+              position_left={leftArmPosition}
+              position_right={rightArmPosition}
+              joint_limits_right={joint_limits_right}
+              joint_limits_left={joint_limits_left}
+              indicator_visibility={props.indicator}
+            />
+
+            <a-sphere 
+              position={`${position_ee[0]} ${position_ee[1]} ${position_ee[2]}`} 
+              scale="0.012 0.012 0.012" 
+              color={stateCodeColor}
+              visible={true}></a-sphere>
+            <a-entity
+              position={`${position_ee[0]} ${position_ee[1]} ${position_ee[2]}`}
+              // ZYX
+              rotation={`${euler_ee_deg[0]} ${-euler_ee_deg[2]} ${-euler_ee_deg[1]} `}
+            >
+              <a-cylinder position="0      0     -0.015" rotation="90 0  0 " height="0.0700" radius="0.0015" color="red" /> 
+              <a-cylinder position="-0.015      0     0" rotation="0  0  90" height="0.0500" radius="0.0015" color="green" />
+              <a-cylinder position="0      0.025      0" rotation="0  90 0 " height="0.0500" radius="0.0015" color="blue" />
+            </a-entity>
+
+            <a-sphere 
+              position={`${position_ee_left[0]} ${position_ee_left[1]} ${position_ee_left[2]}`} 
+              scale="0.012 0.012 0.012" 
+              color={stateCodeColorLeft}
+              visible={true}></a-sphere>
+            <a-entity
+              position={`${position_ee_left[0]} ${position_ee_left[1]} ${position_ee_left[2]}`}
+              // ZYX
+              rotation={`${euler_ee_deg_left[0]} ${-euler_ee_deg_left[2]} ${-euler_ee_deg_left[1]} `}
+              >
+              <a-cylinder position="0      0     -0.015" rotation="90 0  0 " height="0.0700" radius="0.0015" color="red" /> 
+              <a-cylinder position="-0.015      0     0" rotation="0  0  90" height="0.0500" radius="0.0015" color="green" />
+              <a-cylinder position="0      0.025      0" rotation="0  90 0 " height="0.0500" radius="0.0015" color="blue" />
+            </a-entity>
+
+            <a-sphere 
+              position={`${position_ee_cam[0]} ${position_ee_cam[1]} ${position_ee_cam[2]}`} 
+              scale="0.012 0.012 0.012" 
+              color={stateCodeColorCam}
+              visible={true}></a-sphere>
+            <a-entity
+              position={`${position_ee_cam[0]} ${position_ee_cam[1]} ${position_ee_cam[2]}`}
+              // ZYX
+              rotation={`${euler_ee_deg_cam[0]} ${-euler_ee_deg_cam[2]} ${-euler_ee_deg_cam[1]} `}
+            >
+              <a-cylinder position="0      0     -0.015" rotation="90 0  0 " height="0.0500" radius="0.0015" color="red" /> 
+              <a-cylinder position="-0.015      0     0" rotation="0  0  90" height="0.0500" radius="0.0015" color="green" />
+              <a-cylinder position="0      0.025      0" rotation="0  90 0 " height="0.0700" radius="0.0015" color="blue" />
+            </a-entity>
+
+          </a-entity>
+        )}
+
+        {/* Light */}
+        <a-entity light="type: directional; color: #FFF; intensity: 0.5" position="1 1 1"></a-entity>
+        <a-entity light="type: directional; color: #FFF; intensity: 0.5" position="-1 1 1"></a-entity>
+        <a-entity light="type: directional; color: #EEE; intensity: 0.5" position="-1 1 -1"></a-entity>
+        <a-entity light="type: directional; color: #FFF; intensity: 0.5" position="1 1 -1"></a-entity>
+        <a-entity light="type: directional; color: #EFE; intensity: 0.5" position="0 -1 0"></a-entity>
+
+        <a-entity id="rig" position={`${view_cam_pose[0]} ${view_cam_pose[1]} ${view_cam_pose[2]}`} rotation={`${view_cam_pose[3]} ${view_cam_pose[4]} ${view_cam_pose[5]}`}>
+
+          {/* Camera */}
+          <a-camera id="camera" cursor="rayOrigin: mouse;" position="0 0 0">
+
+            <a-entity 
+              position="-0.52 -0.30 -1.20" 
+              rotation="-10 30 -8" 
+              scale="0.6 0.6 0.6"
+              highlight 
+              button-action
+            >
+              <a-plane
+                width="1.0"
+                height="0.45"
+                color="#111"
+                opacity="0.5" 
+                position="0 0.1 0"
+              ></a-plane>
+
+              <a-text 
+                value="Active Task Info" 
+                align="center" 
+                color="#4CC3D9" 
+                width="1.8" 
+                position="0 0.22 0.01" 
+                font ={font_path}
+              ></a-text>
+
+              {[
+                { name: "Task", value: activeTaskId || "---"},
+                { name: "Product", value: activeProductId || "---"},
+              ].map((item, index) => (
+                <a-entity key={item.name} position={`0 ${0.08 - index * 0.1} 0.01`}>
+                  
+                  <a-plane 
+                    width="0.95" 
+                    height="0.09" 
+                    opacity="0.3" 
+                    color={index % 2 === 0 ? "#333" : "#222"} 
+                  ></a-plane>
+
+                  <a-text value={item.name} position="-0.42 0 0.01" width="1.2" font={font_path}></a-text>
+
+                  {/* Value */}
+                  <a-text 
+                    value={item.value} 
+                    position="0.0 0 0.01" 
+                    width="1.2" 
+                    color={statusColors.text}
+                    font={font_path}
+                  ></a-text>
+
+                  {/* Status Indicator */}
+                  {/* <a-entity 
+                    geometry="primitive: circle; radius: 0.015" 
+                    material={`color: ${statusColors[item.status]}; shader: flat`}
+                    position="0.36 0 0.01"
+                  ></a-entity> */}
+
+                </a-entity>
+              ))}
+            </a-entity>
+            
+            {/* Scanner Info */}
+            <a-entity 
+              position="-0.525 -0.56 -1.13" 
+              rotation="-10 30 -8" 
+              scale="0.6 0.6 0.6"
+              highlight 
+              button-action
+            >
+              <a-plane
+                width="1.0"
+                height="0.35"
+                color="#111"
+                opacity="0.5" 
+                position="0 0.13 0"
+              ></a-plane>
+
+              <a-text 
+                value="Scanner Value" 
+                align="center" 
+                color="#4CC3D9" 
+                width="1.8" 
+                position="0 0.24 0.01" 
+                font={font_path}
+              ></a-text>
+
+              {[
+                { 
+                  name: "Product", 
+                  value: WTProduct || "---",
+                  hasData: WTProduct !== "---",
+                  isScanned: scanHistory.product !== null,
+                  isMatch: isProductMatch,
+                },
+                { 
+                  name: "Destination", 
+                  value: WTDestination || "---",
+                  hasData: WTDestination !== "---",
+                },
+              ].map((item, index) => {
+
+                const rowBgColor = index % 2 === 0 ? "#333" : "#222";
+
+                let textColor = "#888"; // 默认灰色（无数据）
+                if (item.hasData) {
+                  if (item.name === "Product") {
+                    if (item.isScanned) {
+                      textColor = item.isMatch ? "#00ff00" : "#ff3333"; // 扫过码才显示匹配色
+                    } else {
+                      textColor = "#fff"; // 有任务数据但未扫码，显示白色
+                    }
+                  } else {
+                    textColor = "#fff"; // Destination 有数据显示白色
+                  }
+                }
+
+                return (
+                  <a-entity key={item.name} position={`0 ${0.14 - index * 0.1} 0.01`}>
+                    
+                    <a-plane 
+                      width="0.95" 
+                      height="0.09" 
+                      color={rowBgColor}
+                      opacity="0.5"
+                      material="shader: flat"
+                    ></a-plane>
+
+                    <a-text 
+                      value={item.name} 
+                      position="-0.42 0 0.01" 
+                      width="1.2" 
+                      font={font_path}
+                      color="#fff"
+                    ></a-text>
+
+                    <a-text 
+                      value={item.value} 
+                      position="0.0 0 0.01" 
+                      width="1.2" 
+                      color={textColor}
+                      font={font_path}
+                    ></a-text>
+                    
+                  </a-entity>
+                );
+              })}
+            </a-entity>
+
+          </a-camera>
+        </a-entity>
+
         {showMenu && (<a-entity
           id="background"
           position="0 0 0"
@@ -154,350 +519,351 @@ export default function RobotScene(props) {
         </a-entity>)}
 
         {showMenu && (
-          <a-entity id="menu" position="0 1.0 -1" highlight button-action>
+          <a-entity id="setting" position="1.0 0.45 -1.2" rotation="0 -37 0" highlight button-action>
             {/* Background Plane */}
             <a-plane
               width="1.2"
-              height="1.2"
+              height="1.0"
               color="#222"
               opacity="1.0"
-              position="0 0 0"
-              class="raycastable"
-            ></a-plane><a-text value="Menu" align="center" color="#fff" width="2.0" position="0 0.4 0.01"></a-text>
+              position="0 0.20 0"
+              // class="raycastable"
+            ></a-plane><a-text value="Robot Settings" align="center" color="#fff" width="2.0" position="0 0.60 0.01" font={font_path}></a-text>
             {/* Button 1 */}
-            <a-entity id="button1" position="-0.3 0.2 0.01" class="raycastable menu-button"
-              geometry="primitive: plane; width: 0.4; height: 0.18"
+            <a-entity id="button1" position="-0.3 0.4 0.01" class="raycastable menu-button"
+              geometry={`primitive: plane; width: ${botton_width}; height: 0.18`}
               material="color: white; opacity: 0.95"
-            ><a-text value="Control Mode \n inSpace" align="center" color="#fff" width="1.0" position="0 0 0.01"></a-text></a-entity>
+            ><a-text value="HMD Control \n Off" align="center" color="#fff" width="1.0" position="0 0 0.01" font={font_path}></a-text></a-entity>
             
             {/* Button 2 */}
-            <a-entity id="button2" position="0.3 0.2 0.01" class="raycastable menu-button"
-              geometry="primitive: plane; width: 0.4; height: 0.18"
+            <a-entity id="button2" position="0.3 0.4 0.01" class="raycastable menu-button"
+              geometry={`primitive: plane; width: ${botton_width}; height: 0.18`}
               material="color: white; opacity: 0.95"
-            ><a-text value="Control Mode \n inBody" align="center" color="#fff" width="1.0" position="0 0 0.01"></a-text></a-entity>
+            ><a-text value="HMD Control \n On" align="center" color="#fff" width="1.0" position="0 0 0.01" font={font_path}></a-text></a-entity>
             
             {/* Button 3 */}
-            <a-entity id="button3" position="-0.3 0.0 0.01" class="raycastable menu-button"
-              geometry="primitive: plane; width: 0.4; height: 0.18"
+            <a-entity id="button3" position="-0.3 0.2 0.01" class="raycastable menu-button"
+              geometry={`primitive: plane; width: ${botton_width}; height: 0.18`}
               material="color: white; opacity: 0.95"
-            ><a-text value="Dual Arm Control \n Off" align="center" color="#fff" width="1.0" position="0 0 0.01"></a-text></a-entity>
+            ><a-text value="Show Video \n Off" align="center" color="#fff" width="1.0" position="0 0 0.01" font={font_path}></a-text></a-entity>
 
             {/* Button 4 */}
-            <a-entity id="button4" position="0.3 0.0 0.01" class="raycastable menu-button"
-              geometry="primitive: plane; width: 0.4; height: 0.18"
+            <a-entity id="button4" position="0.3 0.2 0.01" class="raycastable menu-button"
+              geometry={`primitive: plane; width: ${botton_width}; height: 0.18`}
               material="color: white; opacity: 0.95"
-            ><a-text value="Dual Arm Control \n On" align="center" color="#fff" width="1.0" position="0 0 0.01"></a-text></a-entity>
+            ><a-text value="Show Video \n On" align="center" color="#fff" width="1.0" position="0 0 0.01" font={font_path}></a-text></a-entity>
 
             {/* Button 5 */}
-            <a-entity id="button5" position="-0.3 -0.2 0.01" class="raycastable menu-button"
-              geometry="primitive: plane; width: 0.4; height: 0.18"
+            <a-entity id="button5" position="-0.3 0.0 0.01" class="raycastable menu-button"
+              geometry={`primitive: plane; width: ${botton_width}; height: 0.18`}
               material="color: white; opacity: 0.95"
-            ><a-text value="Indicator \n On" align="center" color="#fff" width="1.0" position="0 0 0.01"></a-text></a-entity>
+            ><a-text value="Show Model \n On" align="center" color="#fff" width="1.0" position="0 0 0.01" font={font_path}></a-text></a-entity>
 
             {/* Button 6 */}
-            <a-entity id="button6" position="0.3 -0.2 0.01" class="raycastable menu-button"
-              geometry="primitive: plane; width: 0.4; height: 0.18"
+            <a-entity id="button6" position="0.3 0.0 0.01" class="raycastable menu-button"
+              geometry={`primitive: plane; width: ${botton_width}; height: 0.18`}
               material="color: white; opacity: 0.95"
-            ><a-text value="Indicator \n Off" align="center" color="#fff" width="1.0" position="0 0 0.01"></a-text></a-entity>
+            ><a-text value="Show Model \n Off" align="center" color="#fff" width="1.0" position="0 0 0.01" font={font_path}></a-text></a-entity>
 
-            {/* Button 7 */}
-            <a-entity id="button7" position="-0.3 -0.4 0.01" class="raycastable menu-button"
-              geometry="primitive: plane; width: 0.4; height: 0.18"
+            {/* Button 7,8 Visual Assist */}
+            {/* <a-entity id="button7" position="-0.3 -0.2 0.01" class="raycastable menu-button"
+              geometry={`primitive: plane; width: ${botton_width}; height: 0.18`}
               material="color: white; opacity: 0.95"
-            ><a-text value="Visual Assist \n On" align="center" color="#fff" width="1.0" position="0 0 0.01"></a-text></a-entity>
+            ><a-text value="Visual Assist \n On" align="center" color="#fff" width="1.0" position="0 0 0.01" font={font_path}></a-text></a-entity>
 
-            {/* Button 8 */}
-            <a-entity id="button8" position="0.3 -0.4 0.01" class="raycastable menu-button"
-              geometry="primitive: plane; width: 0.4; height: 0.18"
+            <a-entity id="button8" position="0.3 -0.2 0.01" class="raycastable menu-button"
+              geometry={`primitive: plane; width: ${botton_width}; height: 0.18`}
               material="color: white; opacity: 0.95"
-            ><a-text value="Visual Assist \n Off" align="center" color="#fff" width="1.0" position="0 0 0.01"></a-text></a-entity>
+            ><a-text value="Visual Assist \n Off" align="center" color="#fff" width="1.0" position="0 0 0.01" font={font_path}></a-text></a-entity> */}
+
+            {/* Button 9,10 Whole Body Control */}
+            {/* <a-entity id="button9" position="-0.3 -0.4 0.01" class="raycastable menu-button"
+              geometry={`primitive: plane; width: ${botton_width}; height: 0.18`}
+              material="color: white; opacity: 0.95"
+            ><a-text value="Whole Body Control \n On" align="center" color="#fff" width="1.0" position="0 0 0.01" font={font_path}></a-text></a-entity>
+
+            <a-entity id="button10" position="0.3 -0.4 0.01" class="raycastable menu-button"
+              geometry={`primitive: plane; width: ${botton_width}; height: 0.18`}
+              material="color: white; opacity: 0.95"
+            ><a-text value="Whole Body Control \n Off" align="center" color="#fff" width="1.0" position="0 0 0.01" font={font_path}></a-text></a-entity> */}
 
           </a-entity>
         )}
 
-        {showMenu && (<a-entity id="leftHand" laser-controls="hand: left" raycaster="objects: .raycastable"></a-entity>)}
-        {showMenu && (<a-entity id="rightHand" laser-controls="hand: right" raycaster="objects: .raycastable" line="color: #118A7E"></a-entity>)}
+        {/* SAP Menu */}
+        {showMenu && (
+          <a-entity id="task" position="-1.0 0.8 -1.2" rotation="0 37 0" highlight button-action>
+            {/* Background Plane */}
+            <a-plane
+              width="1.5"
+              height="1.65"
+              color="#222"
+              opacity="1.0"
+              position="0 -0.35 0"
+              // class="raycastable"
+            ></a-plane>
+            <a-text value="SAP Warehouse Task Menu" align="center" color="#fff" width="2.0" position="0 0.35 0.01" font={font_path}></a-text>
 
-        {/* VR Controller */}
-        <a-entity oculus-touch-controls="hand: right" vr-controller-right visible={true} opacity={0.5}></a-entity>
-        <a-entity oculus-touch-controls="hand: left" vr-controller-left visible={true} opacity={0.5}></a-entity>
+            {/* ----- Data Record Controls ----- */}
+            <a-text value="Warehouse Task Recording" align="right" color="#fff" width="1.25" position="0.0 0.22 0.01" font={font_path}></a-text>
 
-        {/* Robot Model*/}
-        <Assets robot_list={robot_list} viewer={props.viewer} monitor={props.monitor}/>
-        <Select_Robot 
-          {...robotProps} 
-          modelOpacity={props.modelOpacity}
-          position_left={leftArmPosition}
-          position_right={rightArmPosition}
-          indicator_visibility={props.indicator}
-        />
+            {/* Start Button */}
+            <a-entity 
+              id="sap-data-start" 
+              position="-0.46 0.08 0.01" 
+              className="raycastable menu-button" 
+              geometry={`primitive: plane; width: ${botton_width}; height: 0.15`}
+              material={`color: ${isRecording ? '#00ff00' : '#333333'}; opacity: 0.95; shader: flat`}
+              onClick={() => {
+                if (!activeTaskId) {
+                  setTaskMsg("Please select an active task before starting recording.");
+                  return;
+                }
+                handleRecordControl("start");
+              }}
+            >
+              <a-text 
+                value="Start" 
+                align="center" 
+                color="#fff" 
+                width="1.0" 
+                position="0 0 0.01" 
+                font={font_path}
+              ></a-text>
+            </a-entity>
 
-        {/* Remote Cam*/}
-        <a-assets>
-          <video id="leftVideo" autoPlay playsInline crossOrigin="anonymous" muted></video>
-          <video id="rightVideo" autoPlay playsInline crossOrigin="anonymous" muted></video>
-          <video id="subVideo" autoPlay playsInline crossOrigin="anonymous" muted></video>
-        </a-assets>
+            {/* Stop Button */}
+            <a-entity 
+              id="sap-data-stop" 
+              position="-0.020 0.08 0.01" 
+              className="raycastable menu-button"
+              geometry={`primitive: plane; width: ${botton_width}; height: 0.15`}
+              material={`color: ${!isRecording ? '#ff0000' : '#333333'}; opacity: 0.95; shader: flat`}
+              onClick={() => {
+                if (!activeTaskId) {
+                  setTaskMsg("Please select an active task before stopping recording.");
+                  return;
+                }
+                handleRecordControl("stop");
+              }}
+            > 
+              <a-text 
+                value="Stop" 
+                align="center" 
+                color="#fff" 
+                width="1.0" 
+                position="0 0 0.01" 
+                font={font_path}
+              ></a-text>
+            </a-entity>
 
-        {/* Plane or curved image for pinhole camera (ZED camera etc.) */}
-        {/* Curved Image For 720P camera frame (Before undistortion) */}
-        {/* <a-curvedimage
-          id="left-curved"
-          height="7.0"
-          radius="5.7"
-          theta-length="120"
-          position="0.2 1.6 -1.0"
-          rotation="0 -115 0"
-          scale="-1 1 1"
-          stereo-curvedvideo="eye: left; videoId: leftVideo">
-        </a-curvedimage>
+            <a-plane
+              key={`complete-btn-${canComplete}`}  // 👈 canComplete 变化时强制重建元素
+              id="sap-data-complete" 
+              position="0.42 0.08 0.01" 
+              class={canComplete ? "raycastable menu-button" : "menu-button"}
+              width={botton_width}
+              height="0.15"
+              material={`color: ${canComplete ? '#ff9800' : '#1a1a1a'}; opacity: 0.95; shader: flat`}
+              onClick={canComplete ? handleCompleteCurrentTask : () => {
+                setTaskMsg("Action Denied: Task requires at least one 'Start & Stop' record cycle.");
+              }}
+            >
+              <a-text 
+                value="Complete" 
+                align="center" 
+                color={canComplete ? '#fff' : '#555'} 
+                width="1.0" 
+                position="0 0 0.01" 
+                font={font_path}
+              ></a-text>
+            </a-plane>
 
-        <a-curvedimage
-          id="right-curved"
-          height="7.0"
-          radius="5.7"
-          theta-length="120"
-          position="0.2 1.6 -1.0"
-          rotation="0 -120.3 0"
-          scale="-1 1 1"
-          stereo-curvedvideo="eye: right; videoId: rightVideo">
-        </a-curvedimage> */}
+            {/* Message */}
+            <a-entity id="btp_message" position="-0.015 -0.10 0.01" 
+              geometry={`primitive: plane; width: 1.3; height: 0.12`}
+              material="color:rgb(72, 158, 244); opacity: 0.95"
+            ><a-text value={task_msg || "---"} align="center" color="#fff" width="1.0" position="0.0 0 0.01" font={font_path}></a-text></a-entity>
 
-        {/* For 1080P */}
-        {/* <a-curvedimage
-          id="left-curved"
-          height="9.0"
-          radius="5.7"
-          theta-length="180"
-          position="-0.30 1.2 -1.50"
-          rotation="0 -115 0"
-          scale="-1 1 1"
-          stereo-curvedvideo="eye: left; videoId: leftVideo"
-          visible="true"
-        ></a-curvedimage>
+            {/* TASK INFO */}
+            <a-entity id="data-section" position="-0.16 -0.52 0.02">
+              <a-text value="Warehouse Task Info" align="right" color="#fff" width="1.25" position="0.0 0.28 0.01" font={font_path}></a-text>
 
-        <a-curvedimage
-          id="right-curved"
-          height="9.0"
-          radius="5.7"
-          theta-length="180"
-          position="0.20. 1.2 -1.50"
-          rotation="0 -121 0"
-          scale="-1 1 1"
-          stereo-curvedvideo="eye: right; videoId: rightVideo"
-          visible="true"
-        ></a-curvedimage> */}
+              {/* VR UI Dynamic Table Container */}
+              <a-entity position="0.10 0 0">
+                
+                {[
+                  { name: "User", value: apiData?.userID || "---" },
+                  { name: "Robot", value: apiData?.robot || "---" },
+                  { name: "Warehouse", value: apiData?.warehouse || "---" }
+                ].map((item, index) => {
+                  const yPos = 0.2 - index * 0.075; 
+                  return (
+                    <a-entity key={item.name} position={`0 ${yPos} 0`}>
+                      <a-plane width="1.25" height="0.08" color="#1a1a1a" opacity="0.9"></a-plane>
+                      <a-text value={item.name} position="-0.55 0 0.01" width="1.0" font={font_path} color="#aaa"></a-text>
+                      <a-text value={item.value} position="-0.2 0 0.01" width="1.0" font={font_path} color="#fff"></a-text>
+                    </a-entity>
+                  );
+                })}
 
-        {/* Plane Image For 720P camera frame (After undistortion)*/}
-        <a-plane
-          id="left-curved"
-          height="4.0"
-          width="7.0"
-          position="-0.16 1.0 -2.3" // 1080p position="-0.19 1.0 -2.3"; 720p position="0.16 1.0 -2.3"
-          scale="0.6 0.6 0.2"
-          stereo-plane="eye: left; videoId: leftVideo"
-          visible="true"
-        ></a-plane>
+                <a-entity position="0.04 -0.05 0">
+                  <a-plane width="1.29" height="0.08" color="#444a54" opacity="0.9"></a-plane>
+                  <a-text value="Task ID"  position="-0.59 0 0.01" width="1" font={font_path} color="#00c8ff"></a-text>
+                  <a-text value="Product"  position="-0.22 0 0.01" width="1" font={font_path} color="#00c8ff"></a-text>
+                  {/* <a-text value="Status"   position="0.15 0 0.01"  width="1" font={font_path} color="#00c8ff"></a-text> */}
+                  <a-text value="Action"   position="0.315 0 0.01"  width="1" font={font_path} color="#00c8ff"></a-text>
+                </a-entity>
 
-        <a-plane
-          id="right-curved"
-          height="4.0"
-          width="7.0"
-          position="0.16 1.0 -2.3" // 1080p position="0.19 1.0 -2.3"; 720p position="0.16 1.0 -2.3"
-          scale="0.6 0.6 0.2"
-          stereo-plane="eye: right; videoId: rightVideo"
-          visible="true"
-        ></a-plane>
+                {Array.isArray(apiData?.task) && apiData.task.map((taskItem, index) => {
+                  const taskYPos = -0.14 - index * 0.085;                   
+                  const isActive = activeTaskId === taskItem.warehouseTask;
 
-        {/* Sub Camera Plane Image */}
-        <a-plane
-          id="subcam-curved"
-          height="1.5"
-          width="2.3"
-          position="1.1 0.0 -2.0" // 1080p position="0.19 1.0 -2.3"; 720p position="0.16 1.0 -2.3"
-          scale="0.6 0.6 0.2"
-          stereo-plane="eye: left; videoId: subVideo"
-          visible="true"
-        ></a-plane>
+                  const isCompleted = completedTaskIds.includes(taskItem.warehouseTask);
 
-        <a-plane
-          id="subcam-curved"
-          height="1.5"
-          width="2.3"
-          position="1.1 0.0 -2.0" // 1080p position="0.19 1.0 -2.3"; 720p position="0.16 1.0 -2.3"
-          scale="0.6 0.6 0.2"
-          stereo-plane="eye: right; videoId: subVideo"
-          visible="true"
-        ></a-plane>
+                  return (
+                    <a-entity key={taskItem.warehouseTask || index} position={`0 ${taskYPos} 0`}>
+                      
+                      <a-plane 
+                        width="1.25" 
+                        height="0.08" 
+                        color={isActive ? "#1b365d" : (index % 2 === 0 ? "#333" : "#2a2a2a")} 
+                        opacity="0.8"
+                      ></a-plane>
 
-        {/* Sphere video for fisheye camera (VR cam etc.)*/}
-        {/* <a-sphere
-          id="left-curved"
-          // radius="800"
-          position="-0.28 1.0 -0.5"
-          scale="-0.05 0.062 0.015"
-          stereo-spherevideo="eye: left; videoId: leftVideo"
-          geometry="primitive: sphere; radius: 8; thetaStart: 0; thetaLength: 180"
-        ></a-sphere>
+                      {/* 列1：Task ID */}
+                      <a-text 
+                        value={taskItem.warehouseTask || "---"} 
+                        position="-0.55 0 0.01" 
+                        width="1" 
+                        font={font_path}
+                        // color={isActive ? "#00e6ff" : "#fff"}
+                        color={isCompleted ? "#555" : (isActive ? "#00e6ff" : "#fff")}
+                      ></a-text>
 
-        <a-sphere
-          id="right-curved"
-          // radius="8"
-          position="0.28 1.0 -0.5"
-          scale="-0.05 0.062 0.015"
-          stereo-spherevideo="eye: right; videoId: rightVideo"
-          geometry="primitive: sphere; radius: 8; thetaStart: 0; thetaLength: 180"
-        ></a-sphere> */}
+                      {/* 列2：Product */}
+                      <a-text 
+                        value={taskItem.product || "---"} 
+                        position="-0.18 0 0.01" 
+                        width="1" 
+                        // color={isActive ? "#00e6ff" : "#fff"}
+                        color={isCompleted ? "#555" : (isActive ? "#00e6ff" : "#fff")}
+                        font={font_path}
+                      ></a-text>
+
+                      {/* 列3：Status 指示灯 */}
+                      {/* <a-entity 
+                        geometry="primitive: circle; radius: 0.015" 
+                        // material={`color: ${isActive ? "#00e6ff" : "#fff"}; shader: flat`}
+                        material={`color: ${isCompleted ? "#555" : (isActive ? "#00e6ff" : "#fff")}; shader: flat`}
+                        position="0.18 0 0.01"
+                      ></a-entity> */}
+
+                      {/* 列4：Action 交互激活按钮 */}
+                      <a-entity position="0.43 0 0.01">
+                        {/* 按钮可点击实体 */}
+                        <a-plane
+                          // class="raycastable"
+                          class={isCompleted ? "" : "raycastable"}
+                          width="0.22"
+                          height="0.065"
+                          // color={isActive ? "#4CAF50" : "#777"}
+                          color={isCompleted ? "#222" : (isActive ? "#4CAF50" : "#777")}
+                          material="shader: flat"
+                          onClick={() => {
+                            if (isCompleted) return;
+                            handleActivateTask(taskItem);
+                          }}
+                        ></a-plane>
+                        
+                        {/* 按钮文字说明 */}
+                        <a-text
+                          // value={isActive ? "ACTIVE" : "ACTIVATE"}
+                          value={isCompleted ? "DONE" : (isActive ? "ACTIVE" : "ACTIVATE")}
+                          align="center"
+                          position="0 0 0.005"
+                          width="0.8"
+                          font={font_path}
+                          // color="#fff"
+                          color={isCompleted ? "#555" : "#fff"}
+                        ></a-text>
+                      </a-entity>
+                      
+                    </a-entity>
+                  );
+                })}
+              </a-entity>
+            </a-entity>
+
+          </a-entity>
+        )}
+
+
+        {/* -------------- VR Controller -------------*/}
+        {/* <a-entity oculus-touch-controls="hand: right" vr-controller-right visible="true"></a-entity> */}
+        {/* <a-entity oculus-touch-controls="hand: left" vr-controller-left visible="true"></a-entity> */}
+
+        <a-entity id="hand-offset-left" position="0.00 -0.685 0.31">
+          <a-entity 
+            hand-tracking-controls="hand: left; modelStyle: mesh" vr-hand-as-controller="hand: left" >
+          </a-entity>
+        </a-entity>
+
+        <a-entity id="hand-offset-right" position="-0.005 -0.685 0.301">
+          <a-entity 
+            hand-tracking-controls="hand: right; modelStyle: mesh" vr-hand-as-controller="hand: right" >
+          </a-entity>
+        </a-entity>
+
+        <a-entity vr-controller-hmd></a-entity>
         
+        {/* Show Controller Laser Pointer for Right Hand Only (for menu interaction) */}
+        {showMenu && (
+          <a-entity 
+            oculus-touch-controls="hand: right"
+            laser-controls="hand: right" 
+            raycaster="objects: .raycastable"
+          ></a-entity>
+        )}
         
-        {/* Light */}
-        <a-entity light="type: directional; color: #FFF; intensity: 0.25" position="1 1 1"></a-entity>
-        <a-entity light="type: directional; color: #FFF; intensity: 0.25" position="-1 1 1"></a-entity>
-        <a-entity light="type: directional; color: #EEE; intensity: 0.25" position="-1 1 -1"></a-entity>
-        <a-entity light="type: directional; color: #FFF; intensity: 0.25" position="1 1 -1"></a-entity>
-        <a-entity light="type: directional; color: #EFE; intensity: 0.1" position="0 -1 0"></a-entity>
-        <a-entity id="rig" position={`${view_cam_pose[0]} ${view_cam_pose[1]} ${view_cam_pose[2]}`} rotation={`${view_cam_pose[3]} ${view_cam_pose[4]} ${view_cam_pose[5]}`}>
+        {showVideo && (
+        <a-entity
+          stereo-split="
+            eye: left; 
+            videoId: stereoVideo;
+            geometryType: sphere;
+            radius: 100;
+            segmentsWidth: 64;
+            segmentsHeight: 64;
+            phiStart: 9.3;
+            phiLength: 160;
+            thetaStart: 30;
+            thetaLength: 130;
+          "
+          position="-0.30 10.0 10.0"
+          scale="-1 1 1"
+          rotation="0 180 0"
+        ></a-entity>)}
 
-          {/* Camera */}
-          <a-camera id="camera" cursor="rayOrigin: mouse;" position="0 0 0">
-            {/* <a-entity jtext={`text: ${dsp_message}; color: black; background:rgb(31, 219, 255); border: #000000`} position="0 0.7 -1.4"></a-entity>
-            <a-curvedimage
-              id="left-curved"
-              height="9.0"
-              radius="5.7"
-              theta-length="155"
-              position="-0.2 0 0"
-              rotation="0 -115 0"
-              scale="-1 1 1"
-              stereo-curvedvideo="eye: left; videoId: leftVideo"
-            ></a-curvedimage>
+        {showVideo && (
+        <a-entity
+          stereo-split="
+            eye: right; 
+            videoId: stereoVideo;
+            geometryType: sphere;
+            radius: 100;
+            segmentsWidth: 64;
+            segmentsHeight: 64;
+            phiStart: 10.7; 
+            phiLength: 160;
+            thetaStart: 30;
+            thetaLength: 130;
+          "
+          position="0.30 10.0 10.0"
+          scale="-1 1 1"
+          rotation="0 180 0"
+        ></a-entity>)}
 
-            <a-curvedimage
-              id="right-curved"
-              height="9.0"
-              radius="5.7"
-              theta-length="155"
-              position="-0.2 0 0"
-              rotation="0 -121 0"
-              scale="-1 1 1"
-              stereo-curvedvideo="eye: right; videoId: rightVideo"
-            ></a-curvedimage> */}
-          </a-camera>
-
-          {/* End Effector Right*/}
-          </a-entity>
-          <a-sphere 
-            position={`${position_ee[0]+0.3} ${position_ee[1]} ${position_ee[2]}`} 
-            scale="0.012 0.012 0.012" 
-            color={stateCodeColor}
-            visible={true}></a-sphere>
-          <a-entity
-            position={`${position_ee[0]+0.3} ${position_ee[1]} ${position_ee[2]}`}
-            // ZYX
-            rotation={`${euler_ee_deg[0]} ${-euler_ee_deg[2]} ${-euler_ee_deg[1]} `}
-          >
-            <a-cylinder position="0      0     -0.015" rotation="90 0  0 " height="0.0500" radius="0.0015" color="red" /> 
-            <a-cylinder position="-0.015      0     0" rotation="0  0  90" height="0.0500" radius="0.0015" color="green" />
-            <a-cylinder position="0      0.025      0" rotation="0  90 0 " height="0.0700" radius="0.0015" color="blue" />
-          </a-entity>
-
-          {/* End Effector Right Copy*/}
-          <a-entity
-            position={`${vr_controller_pos[0]} ${vr_controller_pos[1]} ${vr_controller_pos[2]}`} 
-            // ZYX
-            rotation={`${euler_ee_deg[0]} ${-euler_ee_deg[2]} ${-euler_ee_deg[1]} `}
-            >
-            <a-cylinder position="0      0     -0.05" rotation="90 0  0 " height="0.150" radius="0.0035" color="red" /> 
-            <a-cylinder position="-0.05      0     0" rotation="0  0  90" height="0.150" radius="0.0035" color="green" />
-            <a-cylinder position="0      0.05      0" rotation="0  90 0 " height="0.150" radius="0.0035" color="blue" />
-          </a-entity>
-
-          {/* End Effector Left */}
-          <a-sphere 
-            position={`${position_ee_left[0]-0.3} ${position_ee_left[1]} ${position_ee_left[2]}`} 
-            scale="0.012 0.012 0.012" 
-            color={stateCodeColorLeft}
-            visible={true}></a-sphere>
-          <a-entity
-            position={`${position_ee_left[0]-0.3} ${position_ee_left[1]} ${position_ee_left[2]}`}
-            // ZYX
-            rotation={`${euler_ee_deg_left[0]} ${-euler_ee_deg_left[2]} ${-euler_ee_deg_left[1]} `}
-            >
-            <a-cylinder position="0      0     -0.015" rotation="90 0  0 " height="0.0500" radius="0.0015" color="red" /> 
-            <a-cylinder position="-0.015      0     0" rotation="0  0  90" height="0.0500" radius="0.0015" color="green" />
-            <a-cylinder position="0      0.025      0" rotation="0  90 0 " height="0.0700" radius="0.0015" color="blue" />
-          </a-entity>
-
-          {/* End Effector Left Copy*/}
-          <a-entity
-            position={`${vr_controller_pos_left[0]} ${vr_controller_pos_left[1]} ${vr_controller_pos_left[2]}`} 
-            // ZYX
-            rotation={`${euler_ee_deg_left[0]} ${-euler_ee_deg_left[2]} ${-euler_ee_deg_left[1]} `}
-            >
-            <a-cylinder position="0      0     -0.05" rotation="90 0  0 " height="0.150" radius="0.0035" color="red" /> 
-            <a-cylinder position="-0.05      0     0" rotation="0  0  90" height="0.150" radius="0.0035" color="green" />
-            <a-cylinder position="0      0.05      0" rotation="0  90 0 " height="0.150" radius="0.0035" color="blue" />
-          </a-entity>
-
-          {/* End Effector Cam */}
-          <a-sphere 
-            position={`${position_ee_cam[0]} ${position_ee_cam[1]+0.208} ${position_ee_cam[2]+0.035}`} 
-            scale="0.012 0.012 0.012" 
-            color={stateCodeColorCam}
-            visible={true}></a-sphere>
-          <a-entity
-            position={`${position_ee_cam[0]} ${position_ee_cam[1]+0.208} ${position_ee_cam[2]+0.035}`}
-            // ZYX
-            rotation={`${euler_ee_deg_cam[0]} ${-euler_ee_deg_cam[2]} ${-euler_ee_deg_cam[1]} `}
-          >
-
-            {/* ZYX */}
-            <a-cylinder position="0      0     -0.015" rotation="90 0  0 " height="0.0500" radius="0.0015" color="red" /> 
-            <a-cylinder position="-0.015      0     0" rotation="0  0  90" height="0.0500" radius="0.0015" color="green" />
-            <a-cylinder position="0      0.025      0" rotation="0  90 0 " height="0.0700" radius="0.0015" color="blue" />
-          </a-entity>
-
-          {/* VR Controller Pose Right*/}
-          <a-entity
-            position={`${vr_controller_pos[0]} ${vr_controller_pos[1]} ${vr_controller_pos[2]}`} 
-          >
-            <a-entity
-              line={`start: 0 0 0; end: ${xAxis.x} ${xAxis.y} ${xAxis.z}; color: red;`}
-              visible="true"
-              opacity="0.3"
-            />
-            <a-entity
-              line={`start: 0 0 0; end: ${yAxis.x} ${yAxis.y} ${yAxis.z}; color: green;`}
-              visible="true"
-              opacity="0.3"
-            />
-            <a-entity
-              line={`start: 0 0 0; end: ${zAxis.x} ${zAxis.y} ${zAxis.z}; color: blue;`}
-              visible="true"
-              opacity="0.3"
-            />
-          </a-entity>
-
-          {/* VR Controller Pose Left*/}
-          <a-entity
-            position={`${vr_controller_pos_left[0]} ${vr_controller_pos_left[1]} ${vr_controller_pos_left[2]}`} 
-          >
-            <a-entity
-              line={`start: 0 0 0; end: ${xAxis_left.x} ${xAxis_left.y} ${xAxis_left.z}; color: red;`}
-              visible="true"
-              opacity="0.3"
-            />
-            <a-entity
-              line={`start: 0 0 0; end: ${yAxis_left.x} ${yAxis_left.y} ${yAxis_left.z}; color: green;`}
-              visible="true"
-              opacity="0.3"
-            />
-            <a-entity
-              line={`start: 0 0 0; end: ${zAxis_left.x} ${zAxis_left.y} ${zAxis_left.z}; color: blue;`}
-              visible="true"
-              opacity="0.3"
-            />
-          </a-entity>
       </a-scene>
 
       <WebInterface {...interfacePropos}/>
